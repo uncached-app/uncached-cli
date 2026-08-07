@@ -47,14 +47,14 @@ npm pack --dry-run
 npm publish --dry-run
 ```
 
-Real publication requires npm authentication and availability of the
-`uncached-cli` package name:
+Tagged release publication runs in GitHub Actions only. Configure these secret
+names in the repository without committing their values:
 
-```bash
-npm login
-npm version patch
-npm publish
-```
+- `UNCACHED_CORE_DEPLOY_KEY`: read-only deploy key for private `natanvianasp/uncached`.
+- `NPM_TOKEN`: npm automation token with publish permission.
+
+Push a version tag matching package versions, such as `v0.1.0`. Pull requests
+build, smoke-test, and preview packages but never publish.
 
 Source repositories remain private. Release CI publishes the root launcher and
 matching platform packages with their compiled Rust binaries.

@@ -1,0 +1,187 @@
+name: Build and release CLI
+
+on:
+  pull_request:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: read
+
+env:
+  CORE_REPOSITORY: natanvianasp/uncached
+  CORE_DEPLOY_KEY_SECRET: UNCACHED_CORE_DEPLOY_KEY
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            package: cli-win32-x64
+          - runner: macos-latest
+            target: x86_64-apple-darwin
+            package: cli-darwin-x64
+          - runner: macos-latest
+            target: aarch64-apple-darwin
+            package: cli-darwin-arm64
+          - runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            package: cli-linux-x64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read pinned core revision
+        shell: bash
+        run: |
+          core_rev=$(sed -n 's/.*rev = "\([0-9a-f]\{40\}\)".*/\1/p' Cargo.toml)
+          test -n "$core_rev" || { echo "Cargo.toml has no pinned uncached-core revision" >&2; exit 1; }
+          echo "CORE_REV=$core_rev" >> "$GITHUB_ENV"
+
+      - name: Require private core deploy key
+        shell: bash
+        env:
+          UNCACHED_CORE_DEPLOY_KEY: ${{ secrets.UNCACHED_CORE_DEPLOY_KEY }}
+        run: |
+          if [ -z "$UNCACHED_CORE_DEPLOY_KEY" ]; then
+            echo "Missing Actions secret UNCACHED_CORE_DEPLOY_KEY; configure a read-only deploy key for $CORE_REPOSITORY." >&2
+            exit 1
+          fi
+
+      - name: Load private core deploy key
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.UNCACHED_CORE_DEPLOY_KEY }}
+
+      - name: Checkout pinned private core
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.CORE_REPOSITORY }}
+          ref: ${{ env.CORE_REV }}
+          path: .private-uncached
+          persist-credentials: false
+
+      - name: Configure Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+          components: rustfmt, clippy
+
+      - name: Test Rust CLI
+        run: cargo test
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Run clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Verify build checksum
+        shell: bash
+        env:
+          BINARY: target/${{ matrix.target }}/release/uncached${{ runner.os == 'Windows' && '.exe' || '' }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { createHash } from 'node:crypto';
+          import { readFile, writeFile } from 'node:fs/promises';
+          import { basename } from 'node:path';
+          const binary = process.env.BINARY;
+          const digest = createHash('sha256').update(await readFile(binary)).digest('hex');
+          const checksumFile = `${binary}.sha256`;
+          await writeFile(checksumFile, `${digest}  ${basename(binary)}\n`);
+          const recorded = (await readFile(checksumFile, 'utf8')).trim().split(/\s+/)[0];
+          if (recorded !== digest) throw new Error('Build checksum verification failed');
+          console.log(`Verified SHA-256 ${digest}`);
+          NODE
+
+      - name: Stage platform package
+        shell: bash
+        run: node scripts/stage-platform-package.mjs --target "${{ matrix.target }}" --binary "target/${{ matrix.target }}/release/uncached${{ runner.os == 'Windows' && '.exe' || '' }}" --package-dir "packages/${{ matrix.package }}"
+
+      - name: Smoke test disposable fixture
+        shell: bash
+        run: |
+          fixture="$RUNNER_TEMP/uncached-smoke"
+          mkdir -p "$fixture/target/debug"
+          printf 'fixture\n' > "$fixture/target/debug/disposable.txt"
+          printf 'n\n' | "packages/${{ matrix.package }}/bin/uncached${{ runner.os == 'Windows' && '.exe' || '' }}" scan "$fixture"
+          test -f "$fixture/target/debug/disposable.txt"
+          printf 'y\n' | "packages/${{ matrix.package }}/bin/uncached${{ runner.os == 'Windows' && '.exe' || '' }}" scan "$fixture"
+          test ! -e "$fixture/target/debug/disposable.txt"
+
+      - name: Preview package contents
+        shell: bash
+        run: npm pack --dry-run
+        working-directory: packages/${{ matrix.package }}
+
+      - name: Preview root publication
+        run: npm pack --dry-run && npm publish --dry-run --ignore-scripts
+
+      - name: Upload staged package
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-${{ matrix.package }}
+          path: packages/${{ matrix.package }}
+          if-no-files-found: error
+
+  publish-platform:
+    if: startsWith(github.ref, 'refs/tags/v') && github.event_name == 'push'
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        package:
+          - cli-win32-x64
+          - cli-darwin-x64
+          - cli-darwin-arm64
+          - cli-linux-x64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - uses: actions/download-artifact@v4
+        with:
+          name: package-${{ matrix.package }}
+          path: packages/${{ matrix.package }}
+      - name: Require npm token
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: test -n "$NPM_TOKEN" || { echo "Missing Actions secret NPM_TOKEN; release is gated until npm authentication is configured." >&2; exit 1; }
+      - name: Verify tag matches package version
+        run: test "$GITHUB_REF_NAME" = "v$(node -p "require('./packages/${{ matrix.package }}/package.json').version")"
+      - name: Publish platform packages
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish "packages/${{ matrix.package }}" --access public
+
+  publish-root:
+    if: startsWith(github.ref, 'refs/tags/v') && github.event_name == 'push'
+    needs: publish-platform
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - name: Require npm token
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: test -n "$NPM_TOKEN" || { echo "Missing Actions secret NPM_TOKEN; release is gated until npm authentication is configured." >&2; exit 1; }
+      - name: Verify tag matches package version
+        run: test "$GITHUB_REF_NAME" = "v$(node -p "require('./package.json').version")"
+      - name: Publish root launcher
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public
