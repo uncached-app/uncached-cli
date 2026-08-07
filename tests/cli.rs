@@ -3,6 +3,23 @@ use std::path::{Path, PathBuf};
 use uncached_cli_bin::run_with_dependencies;
 use uncached_core::{Category, ScanReport, ScanTarget};
 
+struct FlushTrackingWriter {
+    bytes: Vec<u8>,
+    flushed: std::rc::Rc<std::cell::Cell<bool>>,
+}
+
+impl std::io::Write for FlushTrackingWriter {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.bytes.extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.flushed.set(true);
+        Ok(())
+    }
+}
+
 fn target(path: impl Into<PathBuf>, size_bytes: u64) -> ScanTarget {
     ScanTarget::new(path.into(), Category::NodeModules, size_bytes)
 }
@@ -142,6 +159,34 @@ fn asks_once_and_cleans_every_target_after_exact_lowercase_y() {
 }
 
 #[test]
+fn flushes_confirmation_prompt_before_reading_answer() {
+    let mut output = FlushTrackingWriter {
+        bytes: Vec::new(),
+        flushed: std::rc::Rc::new(std::cell::Cell::new(false)),
+    };
+    let flushed = output.flushed.clone();
+    let mut errors = Vec::new();
+    let status = run_with_dependencies(
+        ["scan"].iter().copied(),
+        Path::new("/workspace"),
+        |_| {
+            Ok(ScanReport {
+                targets: vec![target("/workspace/node_modules", 1)],
+                total_bytes: 1,
+            })
+        },
+        |_, _| Ok(()),
+        || {
+            assert!(flushed.get());
+            Ok("N".to_owned())
+        },
+        &mut output,
+        &mut errors,
+    );
+    assert_eq!(status, 0);
+}
+
+#[test]
 fn cancellation_preserves_targets() {
     let cleaned = std::cell::Cell::new(0);
     let (status, _, _) = run(
@@ -216,6 +261,11 @@ fn final_cleanup_boundary_rejects_replaced_target() {
     fs::remove_dir(&target_path).unwrap();
     #[cfg(unix)]
     std::os::unix::fs::symlink(&outside, &target_path).unwrap();
+    #[cfg(windows)]
+    if std::os::windows::fs::symlink_dir(&outside, &target_path).is_err() {
+        fs::remove_dir_all(root).unwrap();
+        return;
+    }
     let (status, _, stderr) = run_at(
         &root,
         &["scan"],

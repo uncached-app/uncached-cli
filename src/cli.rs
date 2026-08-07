@@ -55,6 +55,7 @@ where
     }
 
     let _ = write!(output, "Move all targets to Trash? [y/N] ");
+    let _ = output.flush();
     let confirmed = confirm()
         .map(|answer| answer.trim_end_matches(['\r', '\n']) == "y")
         .unwrap_or(false);
