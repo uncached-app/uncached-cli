@@ -25,11 +25,28 @@ test('finds valid top-level and nested node_modules targets with byte totals', a
   const targets = [
     { path: path.resolve(root, 'nested', 'node_modules'), bytes: 5 },
     { path: path.resolve(root, 'node_modules'), bytes: 3 },
-  ].sort((left, right) => left.path.localeCompare(right.path));
+  ].sort((left, right) => (left.path < right.path ? -1 : left.path > right.path ? 1 : 0));
 
   assert.deepEqual(result.targets, targets);
   assert.equal(result.totalBytes, 8);
   assert.ok(result.targets.every((target) => path.isAbsolute(target.path)));
+});
+
+test('orders targets with code-unit comparison independent of locale', async (t) => {
+  const root = await workspace();
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  await writeFile(path.join(root, 'package.json'), '{}');
+  for (const name of ['z-project', 'a-project']) {
+    await mkdir(path.join(root, name, 'node_modules'), { recursive: true });
+    await writeFile(path.join(root, name, 'package.json'), '{}');
+  }
+
+  const result = await scanWorkspace(root);
+  assert.deepEqual(result.targets.map((target) => path.basename(path.dirname(target.path))), [
+    'a-project',
+    'z-project',
+  ]);
 });
 
 test('ignores node_modules without a parent package.json', async (t) => {

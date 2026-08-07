@@ -1,6 +1,10 @@
 import { lstat, readdir } from 'node:fs/promises';
 import path from 'node:path';
 
+function compareNames(left, right) {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
 async function isRegularFile(filePath) {
   try {
     return (await lstat(filePath)).isFile();
@@ -13,7 +17,7 @@ async function isRegularFile(filePath) {
 async function measureDirectory(directoryPath) {
   let bytes = 0;
   const entries = (await readdir(directoryPath, { withFileTypes: true }))
-    .sort((left, right) => left.name.localeCompare(right.name));
+    .sort((left, right) => compareNames(left.name, right.name));
 
   for (const entry of entries) {
     const entryPath = path.join(directoryPath, entry.name);
@@ -45,7 +49,7 @@ export async function scanWorkspace(workspacePath) {
 
   async function visit(directoryPath) {
     const entries = (await readdir(directoryPath, { withFileTypes: true }))
-      .sort((left, right) => left.name.localeCompare(right.name));
+    .sort((left, right) => compareNames(left.name, right.name));
 
     for (const entry of entries) {
       const entryPath = path.join(directoryPath, entry.name);
@@ -64,7 +68,7 @@ export async function scanWorkspace(workspacePath) {
   }
 
   await visit(resolvedWorkspace);
-  targets.sort((left, right) => left.path.localeCompare(right.path));
+  targets.sort((left, right) => compareNames(left.path, right.path));
 
   return {
     targets,

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { createInterface } from 'node:readline/promises';
+import { lstat } from 'node:fs/promises';
 import { stdin, stdout } from 'node:process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
@@ -9,6 +10,25 @@ import { moveToTrash } from './trash.mjs';
 
 function printUsage(write) {
   write('Usage: uncached scan [workspace]\n');
+}
+
+async function isSafeTarget(workspace, targetPath) {
+  const resolvedTarget = path.resolve(targetPath);
+  const relativeTarget = path.relative(workspace, resolvedTarget);
+  if (relativeTarget === '' || relativeTarget.startsWith(`..${path.sep}`) || path.isAbsolute(relativeTarget)) {
+    return false;
+  }
+  if (path.basename(resolvedTarget) !== 'node_modules') return false;
+
+  try {
+    const targetStats = await lstat(resolvedTarget);
+    if (!targetStats.isDirectory() || targetStats.isSymbolicLink()) return false;
+    const packageStats = await lstat(path.join(path.dirname(resolvedTarget), 'package.json'));
+    return packageStats.isFile() && !packageStats.isSymbolicLink();
+  } catch (error) {
+    if (error.code === 'ENOENT') return false;
+    throw error;
+  }
 }
 
 async function readConfirmation() {
@@ -25,6 +45,7 @@ export async function runCli(arguments_, dependencies = {}) {
     scanWorkspace: scan = scanWorkspace,
     moveToTrash: move = moveToTrash,
     confirm = readConfirmation,
+    validateTarget = isSafeTarget,
     write = (text) => stdout.write(text),
     cwd = process.cwd(),
   } = dependencies;
@@ -53,7 +74,14 @@ export async function runCli(arguments_, dependencies = {}) {
     return 0;
   }
 
-  if ((await confirm()) !== 'y') {
+  let answer;
+  try {
+    answer = await confirm();
+  } catch (error) {
+    write(`Confirmation failed: ${error.message}\n`);
+    return 1;
+  }
+  if (answer !== 'y') {
     write('Cancelled.\n');
     return 0;
   }
@@ -61,6 +89,16 @@ export async function runCli(arguments_, dependencies = {}) {
   let moved = 0;
   let failed = 0;
   for (const target of result.targets) {
+    let safe;
+    try {
+      safe = await validateTarget(path.resolve(workspace), target.path);
+    } catch (error) {
+      safe = false;
+    }
+    if (!safe) {
+      write(`Skipped: ${target.path} (target changed or is no longer safe).\n`);
+      continue;
+    }
     try {
       await move(target.path);
       moved += 1;

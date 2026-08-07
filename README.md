@@ -59,10 +59,10 @@ npm publish --dry-run
 Test the packed CLI in a disposable project before publishing:
 
 ```bash
-npm pack
+TARBALL=$(npm pack --json | node -e "let s=''; process.stdin.on('data', c => s += c).on('end', () => process.stdout.write(JSON.parse(s)[0].filename))")
 mkdir ../uncached-cli-disposable
 cd ../uncached-cli-disposable
 npm init -y
-npm install ../uncached-cli/uncached-cli-0.1.0.tgz
+npm install "../uncached-cli/$TARBALL"
 npx uncached scan .
 ```

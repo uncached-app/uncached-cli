@@ -6,11 +6,13 @@ function harness({ scanResult, answer = 'n', moveToTrash = async () => {} }) {
   const output = [];
   const scanned = [];
   const moved = [];
+  const moveEffects = [];
 
   return {
     output,
     scanned,
     moved,
+    moveEffects,
     dependencies: {
       scanWorkspace: async (workspace) => {
         scanned.push(workspace);
@@ -19,9 +21,12 @@ function harness({ scanResult, answer = 'n', moveToTrash = async () => {} }) {
       },
       moveToTrash: async (targetPath) => {
         moved.push(targetPath);
-        return moveToTrash(targetPath);
+        const result = await moveToTrash(targetPath);
+        moveEffects.push(targetPath);
+        return result;
       },
       confirm: async () => answer,
+      validateTarget: async () => true,
       write: (text) => output.push(text),
     },
   };
@@ -112,6 +117,38 @@ test('cancellation does not move targets', async () => {
   assert.equal(await runCli(['scan'], testHarness.dependencies), 0);
   assert.deepEqual(testHarness.moved, []);
   assert.match(testHarness.output.join(''), /cancel/i);
+});
+
+test('confirmation failure returns nonzero status and concise error', async () => {
+  const testHarness = harness({
+    scanResult: { targets: [{ path: '/workspace/node_modules', bytes: 10 }], totalBytes: 10 },
+  });
+  testHarness.dependencies.confirm = async () => {
+    throw new Error('input closed');
+  };
+
+  assert.equal(await runCli(['scan'], testHarness.dependencies), 1);
+  assert.deepEqual(testHarness.moved, []);
+  assert.match(testHarness.output.join(''), /confirmation failed.*input closed/i);
+});
+
+test('skips targets that fail revalidation before moving', async () => {
+  const testHarness = harness({
+    answer: 'y',
+    scanResult: {
+      targets: [
+        { path: '/workspace/a/node_modules', bytes: 10 },
+        { path: '/workspace/b/node_modules', bytes: 20 },
+      ],
+      totalBytes: 30,
+    },
+  });
+  testHarness.dependencies.validateTarget = async (_workspace, targetPath) =>
+    !targetPath.endsWith('/a/node_modules');
+
+  assert.equal(await runCli(['scan'], testHarness.dependencies), 0);
+  assert.deepEqual(testHarness.moveEffects, ['/workspace/b/node_modules']);
+  assert.match(testHarness.output.join(''), /skipped.*a\/node_modules/i);
 });
 
 test('lowercase y moves every target', async () => {
