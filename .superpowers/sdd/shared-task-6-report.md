@@ -121,3 +121,24 @@ maintainer-triggered workflow. No secret access or release gate was weakened.
   provider behavior and fork-event secret handling still require CI validation.
 - Real release remains gated on repository configuration for named secrets and
   matching version tags; no package was published.
+
+## Shared Task 6 Follow-up
+
+- Fixed private core checkout authentication by passing
+  `${{ secrets.UNCACHED_CORE_DEPLOY_KEY }}` explicitly as `ssh-key` to its
+  `actions/checkout@v4` step. The existing read-only deploy-key presence check,
+  fork pull-request rejection, `persist-credentials: false`, and SSH-agent
+  setup remain unchanged.
+- Added `test/release-workflow.test.mjs`, a static regression test that requires
+  explicit checkout key wiring, preserves fork/missing-secret and tag-only
+  gates, and rejects private-key/token-shaped literals in workflow source.
+- Verification: `node --test test/release-workflow.test.mjs` failed before the
+  workflow change and passed after it; `npm test` passed with 10 tests;
+  `cargo test` passed with 10 integration tests; `cargo fmt --check` and
+  `cargo clippy --all-targets -- -D warnings` passed; root and all four
+  platform `npm pack --dry-run` previews passed; root
+  `npm publish --dry-run --ignore-scripts` passed without publishing.
+- Manual workflow audit found only named secret references and no secret values,
+  private-key material, or credential-shaped literals. PR builds remain
+  non-publishing; publication jobs remain limited to pushed `v*.*.*` tags and
+  still require `NPM_TOKEN`.
