@@ -4,6 +4,15 @@ import test from 'node:test';
 
 const workflowPath = new URL('../.github/workflows/release.yml', import.meta.url);
 
+test('keeps Windows executable filename aligned across package and workflow', async () => {
+  const workflow = await readFile(workflowPath, 'utf8');
+  const manifest = JSON.parse(await readFile(new URL('../packages/cli-win32-x64/package.json', import.meta.url), 'utf8'));
+
+  assert.equal(manifest.bin.uncached, 'bin/uncached.exe');
+  assert.match(workflow, /package: cli-win32-x64[\s\S]*?binary: uncached\.exe/);
+  assert.match(workflow, /packages\/\$\{\{ matrix\.package \}\}\/bin\/\$\{\{ matrix\.binary \}\}/);
+});
+
 test('private core checkout explicitly receives deploy key without weakening release gates', async () => {
   const workflow = await readFile(workflowPath, 'utf8');
   const privateCheckout = workflow.match(

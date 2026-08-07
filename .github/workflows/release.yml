@@ -24,15 +24,19 @@ jobs:
           - runner: windows-latest
             target: x86_64-pc-windows-msvc
             package: cli-win32-x64
+            binary: uncached.exe
           - runner: macos-latest
             target: x86_64-apple-darwin
             package: cli-darwin-x64
+            binary: uncached
           - runner: macos-latest
             target: aarch64-apple-darwin
             package: cli-darwin-arm64
+            binary: uncached
           - runner: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             package: cli-linux-x64
+            binary: uncached
 
     steps:
       - uses: actions/checkout@v4
@@ -96,7 +100,7 @@ jobs:
       - name: Verify build checksum
         shell: bash
         env:
-          BINARY: target/${{ matrix.target }}/release/uncached${{ runner.os == 'Windows' && '.exe' || '' }}
+          BINARY: target/${{ matrix.target }}/release/${{ matrix.binary }}
         run: |
           build_digest=$(node --input-type=module -e "import { createHash } from 'node:crypto'; import { readFile } from 'node:fs/promises'; console.log(createHash('sha256').update(await readFile(process.env.BINARY)).digest('hex'));" )
           echo "Built binary SHA-256: $build_digest"
@@ -104,12 +108,12 @@ jobs:
 
       - name: Stage platform package
         shell: bash
-        run: node scripts/stage-platform-package.mjs --target "${{ matrix.target }}" --binary "target/${{ matrix.target }}/release/uncached${{ runner.os == 'Windows' && '.exe' || '' }}" --package-dir "packages/${{ matrix.package }}"
+        run: node scripts/stage-platform-package.mjs --target "${{ matrix.target }}" --binary "target/${{ matrix.target }}/release/${{ matrix.binary }}" --package-dir "packages/${{ matrix.package }}"
 
       - name: Compare staged checksum
         shell: bash
         env:
-          BINARY: packages/${{ matrix.package }}/bin/uncached${{ runner.os == 'Windows' && '.exe' || '' }}
+          BINARY: packages/${{ matrix.package }}/bin/${{ matrix.binary }}
         run: |
           staged_digest=$(node --input-type=module -e "import { createHash } from 'node:crypto'; import { readFile } from 'node:fs/promises'; console.log(createHash('sha256').update(await readFile(process.env.BINARY)).digest('hex'));" )
           echo "Staged binary SHA-256: $staged_digest"
@@ -118,7 +122,7 @@ jobs:
       - name: Smoke test disposable fixture
         shell: bash
         env:
-          BINARY: packages/${{ matrix.package }}/bin/uncached${{ runner.os == 'Windows' && '.exe' || '' }}
+          BINARY: packages/${{ matrix.package }}/bin/${{ matrix.binary }}
         run: |
           node --input-type=module <<'NODE'
           import { homedir } from 'node:os';

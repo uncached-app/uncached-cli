@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { test } from 'node:test';
 
-import { resolvePlatformPackage, runLauncher } from '../bin/uncached.mjs';
+import { resolvePlatformBinary, resolvePlatformPackage, runLauncher } from '../bin/uncached.mjs';
 
 test('maps supported platforms to exactly one native package', () => {
   assert.equal(resolvePlatformPackage('win32', 'x64'), '@uncached/cli-win32-x64');
@@ -36,6 +36,28 @@ test('forwards arguments and propagates child exit code', async () => {
     ['locate', '@uncached/cli-linux-x64'],
     ['spawn', '/native/uncached', ['scan', '--path', 'workspace with spaces'], { stdio: 'inherit' }],
   ]);
+});
+
+test('resolves Windows package binary with the .exe suffix', async () => {
+  const child = new EventEmitter();
+  const calls = [];
+
+  assert.equal(resolvePlatformBinary('win32'), 'bin/uncached.exe');
+  assert.equal(resolvePlatformBinary('linux'), 'bin/uncached');
+  assert.equal(await runLauncher({
+    platform: 'win32',
+    arch: 'x64',
+    locateBinary: async (...args) => {
+      calls.push(args);
+      return 'C:/native/uncached.exe';
+    },
+    spawn: () => {
+      queueMicrotask(() => child.emit('close', 0));
+      return child;
+    },
+  }), 0);
+
+  assert.deepEqual(calls, [['@uncached/cli-win32-x64', 'win32']]);
 });
 
 test('reports unsupported platforms and missing native packages', async () => {

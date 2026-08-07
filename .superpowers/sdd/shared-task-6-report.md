@@ -142,3 +142,39 @@ maintainer-triggered workflow. No secret access or release gate was weakened.
   private-key material, or credential-shaped literals. PR builds remain
   non-publishing; publication jobs remain limited to pushed `v*.*.*` tags and
   still require `NPM_TOKEN`.
+
+## Shared Task 6 Windows Packaging Follow-up
+
+- Fixed Windows executable naming across the release matrix, staging output,
+  platform package manifest, and root launcher.
+- Windows now consistently uses `bin/uncached.exe`; macOS and Linux continue to
+  use `bin/uncached`.
+- Launcher mapping remains fixed to the supported platform/package matrix and
+  does not accept caller-controlled binary paths.
+- Workflow matrix carries the platform filename explicitly for build checksum,
+  staging, staged checksum, and smoke-test paths; runner OS string interpolation
+  no longer controls executable naming.
+- Added regression coverage for launcher platform filename resolution and
+  manifest/workflow alignment. Existing staging tests continue to verify target
+  validation, Windows `.exe` output, Unix output/mode, and path isolation.
+
+### Follow-up Verification
+
+- `npm test`: 12 passed.
+- Launcher, workflow, and staging tests: 12 passed.
+- Root `npm pack --dry-run`: passed.
+- Root `npm publish --dry-run --ignore-scripts`: passed; npm emitted expected
+  local authentication warning and did not publish.
+- All four platform `npm pack --dry-run` previews: passed; binaries remain
+  intentionally absent from local package previews.
+- `cargo test`: 10 integration tests passed.
+- `cargo fmt --check`: passed.
+- `cargo clippy --all-targets -- -D warnings`: passed.
+- `git diff --check`: passed.
+- Static secret audit of workflow, launcher, and platform manifests: no private
+  key, GitHub token, npm token, password, or credential-shaped literal found.
+
+## Follow-up Concerns
+
+- Native Windows runner execution and actual `.exe` package resolution still
+  require CI validation; no release was triggered and no package was published.

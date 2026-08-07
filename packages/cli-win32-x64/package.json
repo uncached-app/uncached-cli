@@ -7,6 +7,6 @@
   "cpu": ["x64"],
   "files": ["bin/"],
   "bin": {
-    "uncached": "bin/uncached"
+    "uncached": "bin/uncached.exe"
   }
 }

@@ -13,12 +13,22 @@ const PLATFORM_PACKAGES = Object.freeze({
   'linux/x64': '@uncached/cli-linux-x64',
 });
 
+const PLATFORM_BINARIES = Object.freeze({
+  win32: 'bin/uncached.exe',
+  darwin: 'bin/uncached',
+  linux: 'bin/uncached',
+});
+
 export function resolvePlatformPackage(platform, arch) {
   return PLATFORM_PACKAGES[`${platform}/${arch}`];
 }
 
-function locatePackagedBinary(packageName) {
-  return require.resolve(`${packageName}/bin/uncached`);
+export function resolvePlatformBinary(platform) {
+  return PLATFORM_BINARIES[platform];
+}
+
+function locatePackagedBinary(packageName, platform) {
+  return require.resolve(`${packageName}/${resolvePlatformBinary(platform)}`);
 }
 
 function waitForChild(child) {
@@ -44,7 +54,7 @@ export async function runLauncher({
 
   let binary;
   try {
-    binary = await locateBinary(packageName);
+    binary = await locateBinary(packageName, platform);
   } catch {
     writeError(`Install optional package ${packageName} for this platform before running uncached.`);
     return 1;
