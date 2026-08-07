@@ -1,14 +1,14 @@
 {
   "name": "uncached-cli",
   "version": "0.1.0",
-  "description": "Scan workspaces and move node_modules directories to the system Trash.",
+  "description": "Native Rust workspace scanner distributed through npm.",
   "license": "MIT",
   "type": "module",
   "bin": {
-    "uncached": "src/cli.mjs"
+    "uncached": "bin/uncached.mjs"
   },
   "files": [
-    "src/"
+    "bin/"
   ],
   "engines": {
     "node": ">=22"
@@ -16,7 +16,10 @@
   "scripts": {
     "test": "node --test"
   },
-  "dependencies": {
-    "trash": "^10.1.1"
+  "optionalDependencies": {
+    "@uncached/cli-darwin-arm64": "0.1.0",
+    "@uncached/cli-darwin-x64": "0.1.0",
+    "@uncached/cli-linux-x64": "0.1.0",
+    "@uncached/cli-win32-x64": "0.1.0"
   }
 }

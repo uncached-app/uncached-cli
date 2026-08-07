@@ -1,0 +1,12 @@
+{
+  "name": "@uncached/cli-linux-x64",
+  "version": "0.1.0",
+  "description": "Native uncached executable for Linux x64.",
+  "license": "MIT",
+  "os": ["linux"],
+  "cpu": ["x64"],
+  "files": ["bin/"],
+  "bin": {
+    "uncached": "bin/uncached"
+  }
+}

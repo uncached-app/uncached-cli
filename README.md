@@ -1,53 +1,44 @@
 # uncached-cli
 
-Scan a workspace for `node_modules` directories and move confirmed targets to
-the system Trash.
+`uncached-cli` is an npm launcher for the native Rust `uncached` scanner.
+The public npm package contains launcher metadata only; source repositories are
+private, while the free npm package may be public.
 
-## Requirements
+## Supported Platforms
 
-- Node.js 22 or newer
+- Windows x64
+- macOS arm64
+- macOS x64
+- Linux x64
+
+Platform-specific optional packages provide native binaries. Release CI builds
+and publishes those binary artifacts. This repository does not commit
+placeholder executables.
 
 ## Usage
 
-Run from npm without a global install:
+Run without a global install:
 
 ```bash
 npx uncached scan
 npx uncached scan ./path/to/workspace
 ```
 
-When no workspace is provided, `uncached` scans the current directory. The
-command lists detected targets and asks for one confirmation. Enter lowercase
-`y` to move all targets to the system Trash; any other response cancels.
-
-`uncached` uses Trash only. It never permanently deletes files and does not
-modify `package.json`, lockfiles, or files outside confirmed targets.
+The launcher forwards all arguments to the packaged Rust executable. Runtime
+scanning, validation, confirmation, and Trash behavior belong to Rust
+`uncached-core` and the Rust CLI, not JavaScript.
 
 ## Local Development
 
-Install dependencies:
-
 ```bash
 npm install
-```
-
-Run the test suite with Node's native test-file discovery:
-
-```bash
 npm test
 ```
 
+Launcher tests inject fake platform binaries because release binaries are
+produced by Task 6.
+
 ## Release
-
-Real publication requires npm authentication and availability of the
-`uncached-cli` package name.
-
-```bash
-npm login
-npm version patch
-npm publish
-npx uncached scan ./path/to/workspace
-```
 
 Preview package contents and publication metadata without publishing:
 
@@ -56,13 +47,14 @@ npm pack --dry-run
 npm publish --dry-run
 ```
 
-Test the packed CLI in a disposable project before publishing:
+Real publication requires npm authentication and availability of the
+`uncached-cli` package name:
 
 ```bash
-TARBALL=$(npm pack --json | node -e "let s=''; process.stdin.on('data', c => s += c).on('end', () => process.stdout.write(JSON.parse(s)[0].filename))")
-mkdir ../uncached-cli-disposable
-cd ../uncached-cli-disposable
-npm init -y
-npm install "../uncached-cli/$TARBALL"
-npx uncached scan .
+npm login
+npm version patch
+npm publish
 ```
+
+Source repositories remain private. Release CI publishes the root launcher and
+matching platform packages with their compiled Rust binaries.
