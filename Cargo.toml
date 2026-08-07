@@ -11,4 +11,4 @@ name = "uncached"
 path = "src/main.rs"
 
 [dependencies]
-uncached-core = { git = "ssh://git@github.com/natanvianasp/uncached.git", rev = "1a7437aa2cc2e0fe7eff55250a0f102b300c765c", package = "uncached-core" }
+uncached-core = { git = "ssh://git@github.com/natanvianasp/uncached.git", rev = "2a09c1e766d0651cc11e9243aa86ce66c5b10f4a", package = "uncached-core" }
