@@ -1,0 +1,238 @@
+use std::fs;
+use std::path::{Path, PathBuf};
+use uncached_cli_bin::run_with_dependencies;
+use uncached_core::{Category, ScanReport, ScanTarget};
+
+fn target(path: impl Into<PathBuf>, size_bytes: u64) -> ScanTarget {
+    ScanTarget::new(path.into(), Category::NodeModules, size_bytes)
+}
+
+fn run(
+    args: &[&str],
+    scan: impl FnMut(&Path) -> Result<ScanReport, String>,
+    clean: impl FnMut(&Path, &ScanTarget) -> Result<(), String>,
+    answer: &str,
+) -> (i32, String, String) {
+    run_at(Path::new("/workspace"), args, scan, clean, answer)
+}
+
+fn run_at(
+    workspace: &Path,
+    args: &[&str],
+    scan: impl FnMut(&Path) -> Result<ScanReport, String>,
+    clean: impl FnMut(&Path, &ScanTarget) -> Result<(), String>,
+    answer: &str,
+) -> (i32, String, String) {
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    let status = run_with_dependencies(
+        args.iter().copied(),
+        workspace,
+        scan,
+        clean,
+        || Ok(answer.to_owned()),
+        &mut stdout,
+        &mut stderr,
+    );
+    (
+        status,
+        String::from_utf8(stdout).unwrap(),
+        String::from_utf8(stderr).unwrap(),
+    )
+}
+
+#[test]
+fn defaults_workspace_to_current_directory() {
+    let mut seen = None;
+    let (status, _, _) = run(
+        &["scan"],
+        |workspace| {
+            seen = Some(workspace.to_path_buf());
+            Ok(ScanReport {
+                targets: Vec::new(),
+                total_bytes: 0,
+            })
+        },
+        |_, _| panic!("empty scan must not clean"),
+        "N",
+    );
+    assert_eq!(status, 0);
+    assert_eq!(seen, Some(PathBuf::from("/workspace")));
+}
+
+#[test]
+fn passes_explicit_workspace_to_core() {
+    let mut seen = None;
+    let (status, _, _) = run(
+        &["scan", "./fixture"],
+        |workspace| {
+            seen = Some(workspace.to_path_buf());
+            Ok(ScanReport {
+                targets: Vec::new(),
+                total_bytes: 0,
+            })
+        },
+        |_, _| panic!("empty scan must not clean"),
+        "N",
+    );
+    assert_eq!(status, 0);
+    assert_eq!(seen, Some(PathBuf::from("./fixture")));
+}
+
+#[test]
+fn rejects_invalid_command_and_extra_workspace() {
+    for args in [["clean"].as_slice(), &["scan", "one", "two"]].iter() {
+        let (status, _, stderr) = run(
+            args,
+            |_| panic!("invalid args must not scan"),
+            |_, _| Ok(()),
+            "N",
+        );
+        assert_ne!(status, 0);
+        assert!(stderr.contains("usage"));
+    }
+}
+
+#[test]
+fn prints_each_target_and_total_for_non_empty_scan() {
+    let first = target("/workspace/a/node_modules", 12);
+    let second = target("/workspace/b/node_modules", 30);
+    let report = ScanReport {
+        targets: vec![first, second],
+        total_bytes: 42,
+    };
+    let (status, stdout, _) = run(&["scan"], |_| Ok(report.clone()), |_, _| Ok(()), "N");
+    assert_eq!(status, 0);
+    assert!(stdout.contains("/workspace/a/node_modules"));
+    assert!(stdout.contains("12 bytes"));
+    assert!(stdout.contains("/workspace/b/node_modules"));
+    assert!(stdout.contains("Total: 42 bytes"));
+}
+
+#[test]
+fn asks_once_and_cleans_every_target_after_exact_lowercase_y() {
+    let targets = vec![
+        target("/workspace/a/node_modules", 1),
+        target("/workspace/b/node_modules", 2),
+    ];
+    let cleaned = std::cell::RefCell::new(Vec::new());
+    let (status, stdout, _) = run(
+        &["scan"],
+        |_| {
+            Ok(ScanReport {
+                targets: targets.clone(),
+                total_bytes: 3,
+            })
+        },
+        |_, item| {
+            cleaned.borrow_mut().push(item.path.clone());
+            Ok(())
+        },
+        "y",
+    );
+    assert_eq!(status, 0);
+    assert_eq!(
+        *cleaned.borrow(),
+        targets
+            .iter()
+            .map(|item| item.path.clone())
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(stdout.matches("Move all targets").count(), 1);
+}
+
+#[test]
+fn cancellation_preserves_targets() {
+    let cleaned = std::cell::Cell::new(0);
+    let (status, _, _) = run(
+        &["scan"],
+        |_| {
+            Ok(ScanReport {
+                targets: vec![target("/workspace/a/node_modules", 1)],
+                total_bytes: 1,
+            })
+        },
+        |_, _| {
+            cleaned.set(cleaned.get() + 1);
+            Ok(())
+        },
+        "Y",
+    );
+    assert_eq!(status, 0);
+    assert_eq!(cleaned.get(), 0);
+}
+
+#[test]
+fn reports_cleanup_failure_and_continues() {
+    let cleaned = std::cell::RefCell::new(Vec::new());
+    let (status, stdout, stderr) = run(
+        &["scan"],
+        |_| {
+            Ok(ScanReport {
+                targets: vec![
+                    target("/workspace/a/node_modules", 1),
+                    target("/workspace/b/node_modules", 2),
+                ],
+                total_bytes: 3,
+            })
+        },
+        |_, item| {
+            cleaned.borrow_mut().push(item.path.clone());
+            if item.path.ends_with("a/node_modules") {
+                Err("trash unavailable".into())
+            } else {
+                Ok(())
+            }
+        },
+        "y",
+    );
+    assert_eq!(status, 0);
+    assert_eq!(cleaned.borrow().len(), 2);
+    assert!(stderr.contains("trash unavailable"));
+    assert!(stdout.contains("Moved"));
+}
+
+#[test]
+fn scan_failure_returns_nonzero_without_confirmation() {
+    let (status, _, stderr) = run(
+        &["scan"],
+        |_| Err("workspace is not a directory".into()),
+        |_, _| Ok(()),
+        "y",
+    );
+    assert_ne!(status, 0);
+    assert!(stderr.contains("workspace is not a directory"));
+}
+
+#[test]
+fn final_cleanup_boundary_rejects_replaced_target() {
+    let root = std::env::temp_dir().join(format!("uncached-cli-{}", std::process::id()));
+    let project = root.join("project");
+    let target_path = project.join("node_modules");
+    let outside = root.join("outside");
+    fs::create_dir_all(&target_path).unwrap();
+    fs::create_dir_all(&outside).unwrap();
+    let report_target = target(&target_path, 0);
+    fs::remove_dir(&target_path).unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&outside, &target_path).unwrap();
+    let (status, _, stderr) = run_at(
+        &root,
+        &["scan"],
+        move |_| {
+            Ok(ScanReport {
+                targets: vec![report_target.clone()],
+                total_bytes: 0,
+            })
+        },
+        move |workspace, item| {
+            uncached_core::validate_clean_target(workspace, item)
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        },
+        "y",
+    );
+    assert_eq!(status, 0);
+    assert!(stderr.contains("target"));
+    fs::remove_dir_all(root).unwrap();
+}

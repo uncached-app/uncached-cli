@@ -1,6 +1,7 @@
 node_modules/
 coverage/
 *.tgz
+target/
 
 # OS artifacts
 .DS_Store

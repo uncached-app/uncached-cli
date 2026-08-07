@@ -1,0 +1,14 @@
+[package]
+name = "uncached-cli-bin"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+path = "src/cli.rs"
+
+[[bin]]
+name = "uncached"
+path = "src/main.rs"
+
+[dependencies]
+uncached-core = { git = "ssh://git@github.com/natanvianasp/uncached.git", rev = "1a7437aa2cc2e0fe7eff55250a0f102b300c765c", package = "uncached-core" }
