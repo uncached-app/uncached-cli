@@ -11,7 +11,6 @@ permissions:
 
 env:
   CORE_REPOSITORY: natanvianasp/uncached
-  CORE_DEPLOY_KEY_SECRET: UNCACHED_CORE_DEPLOY_KEY
 
 jobs:
   build:
@@ -69,15 +68,6 @@ jobs:
         uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.UNCACHED_CORE_DEPLOY_KEY }}
-
-      - name: Checkout pinned private core
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ env.CORE_REPOSITORY }}
-          ref: ${{ env.CORE_REV }}
-          path: .private-uncached
-          ssh-key: ${{ secrets.UNCACHED_CORE_DEPLOY_KEY }}
-          persist-credentials: false
 
       - name: Configure Rust
         uses: dtolnay/rust-toolchain@stable
@@ -174,6 +164,22 @@ jobs:
           if (!moved) throw new Error(`target was not observed in system Trash (${trashRoots.join(', ')})`);
           console.log('Smoke test verified N preservation, lowercase y cleanup, system Trash movement, and unrelated fixture preservation.');
           NODE
+
+      - name: Pack and install launcher with matching platform package
+        shell: bash
+        run: |
+          root_tarball=$(npm pack --json | node -e "let data=''; process.stdin.on('data', chunk => data += chunk); process.stdin.on('end', () => console.log(JSON.parse(data)[0].filename));")
+          platform_tarball=$(cd "packages/${{ matrix.package }}" && npm pack --json | node -e "let data=''; process.stdin.on('data', chunk => data += chunk); process.stdin.on('end', () => console.log(JSON.parse(data)[0].filename));")
+          smoke_root="$RUNNER_TEMP/uncached-npm-install"
+          smoke_workspace="$RUNNER_TEMP/uncached-npm-fixture"
+          rm -rf "$smoke_root" "$smoke_workspace"
+          mkdir -p "$smoke_root" "$smoke_workspace/node_modules/disposable-package"
+          printf '{"name":"uncached-npm-fixture","version":"1.0.0"}\n' > "$smoke_workspace/package.json"
+          printf '{"name":"disposable-package","version":"1.0.0"}\n' > "$smoke_workspace/node_modules/disposable-package/package.json"
+          npm install --prefix "$smoke_root" --no-save --ignore-scripts "$PWD/$root_tarball" "$PWD/packages/${{ matrix.package }}/$platform_tarball"
+          printf 'N\n' | (cd "$smoke_root" && npx --no-install uncached scan "$smoke_workspace")
+          test -d "$smoke_workspace/node_modules"
+          echo "Packed launcher and staged ${{ matrix.package }} passed npx scan cancellation smoke test."
 
       - name: Preview package contents
         shell: bash

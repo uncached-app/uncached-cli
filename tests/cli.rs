@@ -208,6 +208,78 @@ fn cancellation_preserves_targets() {
 }
 
 #[test]
+fn prints_cancellation_status_for_explicit_non_y_answer() {
+    let (status, stdout, stderr) = run(
+        &["scan"],
+        |_| {
+            Ok(ScanReport {
+                targets: vec![target("/workspace/node_modules", 1)],
+                total_bytes: 1,
+            })
+        },
+        |_, _| panic!("explicit cancellation must not clean"),
+        "N",
+    );
+
+    assert_eq!(status, 0);
+    assert!(stdout.contains("Cancelled"));
+    assert!(stderr.is_empty());
+}
+
+#[test]
+fn confirmation_read_error_is_nonzero_and_concise() {
+    let (status, _, stderr) = run_with_confirmation(
+        &["scan"],
+        |_| {
+            Ok(ScanReport {
+                targets: vec![target("/workspace/node_modules", 1)],
+                total_bytes: 1,
+            })
+        },
+        |_, _| panic!("confirmation error must not clean"),
+        || {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "stdin closed",
+            ))
+        },
+    );
+
+    assert_eq!(status, 1);
+    assert!(stderr.contains("confirmation failed: stdin closed"));
+    assert!(!stderr.contains("Cancelled"));
+}
+
+fn run_with_confirmation<S, C, Q>(
+    args: &[&str],
+    scan: S,
+    clean: C,
+    confirm: Q,
+) -> (i32, String, String)
+where
+    S: FnMut(&Path) -> Result<ScanReport, String>,
+    C: FnMut(&Path, &ScanTarget) -> Result<(), String>,
+    Q: FnMut() -> std::io::Result<String>,
+{
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    let status = run_with_dependencies(
+        args.iter().copied(),
+        Path::new("/workspace"),
+        scan,
+        clean,
+        confirm,
+        &mut stdout,
+        &mut stderr,
+    );
+    (
+        status,
+        String::from_utf8(stdout).unwrap(),
+        String::from_utf8(stderr).unwrap(),
+    )
+}
+
+#[test]
 fn reports_cleanup_failure_and_continues() {
     let cleaned = std::cell::RefCell::new(Vec::new());
     let (status, stdout, stderr) = run(

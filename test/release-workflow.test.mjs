@@ -13,20 +13,27 @@ test('keeps Windows executable filename aligned across package and workflow', as
   assert.match(workflow, /packages\/\$\{\{ matrix\.package \}\}\/bin\/\$\{\{ matrix\.binary \}\}/);
 });
 
-test('private core checkout explicitly receives deploy key without weakening release gates', async () => {
+test('private core Cargo fetch keeps deploy key auth without redundant checkout', async () => {
   const workflow = await readFile(workflowPath, 'utf8');
-  const privateCheckout = workflow.match(
-    /- name: Checkout pinned private core[\s\S]*?(?=\n      - name:|\n  publish-|$)/,
-  )?.[0];
-
-  assert.ok(privateCheckout, 'private core checkout step must exist');
-  assert.match(privateCheckout, /uses: actions\/checkout@v4/);
-  assert.match(privateCheckout, /ssh-key: \$\{\{ secrets\.UNCACHED_CORE_DEPLOY_KEY \}\}/);
-  assert.match(privateCheckout, /persist-credentials: false/);
+  assert.match(workflow, /uses: webfactory\/ssh-agent@v0\.9\.0/);
+  assert.match(workflow, /ssh-private-key: \$\{\{ secrets\.UNCACHED_CORE_DEPLOY_KEY \}\}/);
+  assert.match(workflow, /Cargo\.toml/);
+  assert.doesNotMatch(workflow, /Checkout pinned private core/);
+  assert.doesNotMatch(workflow, /path: \.private-uncached/);
 
   assert.match(workflow, /github\.event_name == 'pull_request' && github\.event\.pull_request\.head\.repo\.fork/);
   assert.match(workflow, /if \[ -z "\$UNCACHED_CORE_DEPLOY_KEY" \]/);
   assert.match(workflow, /if: startsWith\(github\.ref, 'refs\/tags\/v'\) && github\.event_name == 'push'/g);
   assert.doesNotMatch(workflow, /-----BEGIN [A-Z ]+ PRIVATE KEY-----/);
   assert.doesNotMatch(workflow, /(?:ghp|github_pat|npm_)[A-Za-z0-9_]+/);
+});
+
+test('packs and installs root launcher with matching staged platform package before publish', async () => {
+  const workflow = await readFile(workflowPath, 'utf8');
+  assert.match(workflow, /npm pack --json/);
+  assert.match(workflow, /npm install --prefix[\s\S]*root_tarball[\s\S]*platform_tarball/);
+  assert.match(workflow, /npx --no-install uncached scan/);
+  assert.match(workflow, /publish-platform/);
+  assert.ok(workflow.indexOf('npx --no-install uncached scan') < workflow.indexOf('publish-platform'));
+  assert.doesNotMatch(workflow, /CORE_DEPLOY_KEY_SECRET/);
 });

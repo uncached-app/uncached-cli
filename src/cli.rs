@@ -56,10 +56,15 @@ where
 
     let _ = write!(output, "Move all targets to Trash? [y/N] ");
     let _ = output.flush();
-    let confirmed = confirm()
-        .map(|answer| answer.trim_end_matches(['\r', '\n']) == "y")
-        .unwrap_or(false);
-    if !confirmed {
+    let answer = match confirm() {
+        Ok(answer) => answer,
+        Err(error) => {
+            let _ = writeln!(errors, "confirmation failed: {error}");
+            return 1;
+        }
+    };
+    if answer.trim_end_matches(['\r', '\n']) != "y" {
+        let _ = writeln!(output, "Cancelled.");
         return 0;
     }
 
