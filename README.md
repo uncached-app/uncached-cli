@@ -1,2 +1,38 @@
 # uncached-cli
-Free CLI to scan workspaces and move node_modules to the system Trash.
+
+Scan a workspace for `node_modules` directories and move confirmed targets to
+the system Trash.
+
+## Requirements
+
+- Node.js 22 or newer
+
+## Usage
+
+Run from npm without a global install:
+
+```bash
+npx uncached scan
+npx uncached scan ./path/to/workspace
+```
+
+When no workspace is provided, `uncached` scans the current directory. The
+command lists detected targets and asks for one confirmation. Enter lowercase
+`y` to move all targets to the system Trash; any other response cancels.
+
+`uncached` uses Trash only. It never permanently deletes files and does not
+modify `package.json`, lockfiles, or files outside confirmed targets.
+
+## Local Development
+
+Install dependencies:
+
+```bash
+npm install
+```
+
+Run the test suite with Node's native test-file discovery:
+
+```bash
+npm test
+```

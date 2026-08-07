@@ -1,0 +1,14 @@
+node_modules/
+coverage/
+*.tgz
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Editor artifacts
+.idea/
+.vscode/
+*.swp
+*.swo

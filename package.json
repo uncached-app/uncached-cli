@@ -1,0 +1,21 @@
+{
+  "name": "uncached-cli",
+  "version": "0.1.0",
+  "description": "Scan workspaces and move node_modules directories to the system Trash.",
+  "type": "module",
+  "bin": {
+    "uncached": "src/cli.mjs"
+  },
+  "files": [
+    "src/"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "dependencies": {
+    "trash": "^10.1.1"
+  }
+}
