@@ -13,3 +13,23 @@ Desktop.ini
 .vscode/
 *.swp
 *.swo
+
+# Local tooling & AI agent state
+.agent/
+.agents/
+.superpowers/
+.claude/
+.cursor/
+.cursorrules
+.windsurf/
+.windsurfrules
+.cline/
+.roo/
+.clinerules
+.roomodes
+.codex/
+.opencode/
+.aider*
+*.local.md
+docs/superpowers/
+
