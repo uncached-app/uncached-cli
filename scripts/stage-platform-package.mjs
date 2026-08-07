@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 
-import { chmod, copyFile, mkdir, stat } from 'node:fs/promises';
+import { chmod, copyFile, lstat, mkdir, realpath, stat } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import { basename, dirname, join, resolve, sep } from 'node:path';
+import { dirname, join, parse, relative, resolve } from 'node:path';
 
 const TARGETS = Object.freeze({
   'x86_64-pc-windows-msvc': { binary: 'uncached.exe' },
@@ -31,8 +31,26 @@ function parseArgs(argv) {
 }
 
 function insideDirectory(file, directory) {
-  const relative = resolve(file).slice(resolve(directory).length);
-  return relative.startsWith(sep) && !relative.includes(`${sep}..${sep}`);
+  const path = relative(resolve(directory), resolve(file));
+  return path !== '' && !path.startsWith('..') && !parse(path).root;
+}
+
+async function rejectSymlinkComponents(path) {
+  const absolute = resolve(path);
+  const parsed = parse(absolute);
+  let current = parsed.root;
+  const components = relative(parsed.root, absolute).split(/[\\/]/).filter(Boolean);
+  for (const component of components) {
+    current = join(current, component);
+    try {
+      if ((await lstat(current)).isSymbolicLink()) {
+        throw new Error(`Refusing symlink path component: ${current}`);
+      }
+    } catch (error) {
+      if (error.code === 'ENOENT') break;
+      throw error;
+    }
+  }
 }
 
 async function main(argv) {
@@ -50,7 +68,15 @@ async function main(argv) {
   }
   if (!insideDirectory(destination, packageDir)) throw new Error('Refusing destination outside package directory');
 
+  await rejectSymlinkComponents(packageDir);
+  await rejectSymlinkComponents(join(packageDir, 'bin'));
   await mkdir(dirname(destination), { recursive: true });
+  await rejectSymlinkComponents(destination);
+  const packageReal = await realpath(packageDir);
+  const destinationParentReal = await realpath(dirname(destination));
+  if (!insideDirectory(destinationParentReal, packageReal)) {
+    throw new Error('Refusing destination outside package directory after resolving real paths');
+  }
   await copyFile(input, destination);
   if (targetInfo.binary === 'uncached') await chmod(destination, 0o755);
 

@@ -44,6 +44,13 @@ jobs:
           test -n "$core_rev" || { echo "Cargo.toml has no pinned uncached-core revision" >&2; exit 1; }
           echo "CORE_REV=$core_rev" >> "$GITHUB_ENV"
 
+      - name: Reject fork pull request without private-core access
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork
+        shell: bash
+        run: |
+          echo "Fork pull requests cannot receive UNCACHED_CORE_DEPLOY_KEY; run this check from a branch in the main repository or use a trusted maintainer-triggered workflow." >&2
+          exit 1
+
       - name: Require private core deploy key
         shell: bash
         env:
@@ -90,33 +97,78 @@ jobs:
         env:
           BINARY: target/${{ matrix.target }}/release/uncached${{ runner.os == 'Windows' && '.exe' || '' }}
         run: |
-          node --input-type=module <<'NODE'
-          import { createHash } from 'node:crypto';
-          import { readFile, writeFile } from 'node:fs/promises';
-          import { basename } from 'node:path';
-          const binary = process.env.BINARY;
-          const digest = createHash('sha256').update(await readFile(binary)).digest('hex');
-          const checksumFile = `${binary}.sha256`;
-          await writeFile(checksumFile, `${digest}  ${basename(binary)}\n`);
-          const recorded = (await readFile(checksumFile, 'utf8')).trim().split(/\s+/)[0];
-          if (recorded !== digest) throw new Error('Build checksum verification failed');
-          console.log(`Verified SHA-256 ${digest}`);
-          NODE
+          build_digest=$(node --input-type=module -e "import { createHash } from 'node:crypto'; import { readFile } from 'node:fs/promises'; console.log(createHash('sha256').update(await readFile(process.env.BINARY)).digest('hex'));" )
+          echo "Built binary SHA-256: $build_digest"
+          echo "BUILD_DIGEST=$build_digest" >> "$GITHUB_ENV"
 
       - name: Stage platform package
         shell: bash
         run: node scripts/stage-platform-package.mjs --target "${{ matrix.target }}" --binary "target/${{ matrix.target }}/release/uncached${{ runner.os == 'Windows' && '.exe' || '' }}" --package-dir "packages/${{ matrix.package }}"
 
+      - name: Compare staged checksum
+        shell: bash
+        env:
+          BINARY: packages/${{ matrix.package }}/bin/uncached${{ runner.os == 'Windows' && '.exe' || '' }}
+        run: |
+          staged_digest=$(node --input-type=module -e "import { createHash } from 'node:crypto'; import { readFile } from 'node:fs/promises'; console.log(createHash('sha256').update(await readFile(process.env.BINARY)).digest('hex'));" )
+          echo "Staged binary SHA-256: $staged_digest"
+          test "$BUILD_DIGEST" = "$staged_digest" || { echo "Build/staged checksum mismatch" >&2; exit 1; }
+
       - name: Smoke test disposable fixture
         shell: bash
+        env:
+          BINARY: packages/${{ matrix.package }}/bin/uncached${{ runner.os == 'Windows' && '.exe' || '' }}
         run: |
-          fixture="$RUNNER_TEMP/uncached-smoke"
-          mkdir -p "$fixture/target/debug"
-          printf 'fixture\n' > "$fixture/target/debug/disposable.txt"
-          printf 'n\n' | "packages/${{ matrix.package }}/bin/uncached${{ runner.os == 'Windows' && '.exe' || '' }}" scan "$fixture"
-          test -f "$fixture/target/debug/disposable.txt"
-          printf 'y\n' | "packages/${{ matrix.package }}/bin/uncached${{ runner.os == 'Windows' && '.exe' || '' }}" scan "$fixture"
-          test ! -e "$fixture/target/debug/disposable.txt"
+          node --input-type=module <<'NODE'
+          import { homedir } from 'node:os';
+          import { parse, join } from 'node:path';
+          import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+          import { spawnSync } from 'node:child_process';
+
+          const binary = process.env.BINARY;
+          const fixture = join(process.env.RUNNER_TEMP, 'uncached-smoke');
+          rmSync(fixture, { recursive: true, force: true });
+          mkdirSync(join(fixture, 'node_modules', 'disposable-package'), { recursive: true });
+          mkdirSync(join(fixture, 'unrelated-fixture'), { recursive: true });
+          writeFileSync(join(fixture, 'package.json'), JSON.stringify({ name: 'uncached-smoke-fixture', version: '1.0.0' }));
+          writeFileSync(join(fixture, 'node_modules', 'disposable-package', 'package.json'), JSON.stringify({ name: 'disposable-package', version: '1.0.0' }));
+          writeFileSync(join(fixture, 'unrelated-fixture', 'keep.txt'), 'must remain');
+
+          function walk(root) {
+            const found = new Set();
+            if (!existsSync(root)) return found;
+            const visit = (path) => {
+              let entries;
+              try { entries = readdirSync(path, { withFileTypes: true }); } catch { return; }
+              for (const entry of entries) {
+                const child = join(path, entry.name);
+                found.add(child);
+                if (entry.isDirectory()) visit(child);
+              }
+            };
+            visit(root);
+            return found;
+          }
+
+          const home = homedir();
+          const trashRoots = process.platform === 'win32'
+            ? [join(parse(home).root, '$Recycle.Bin')]
+            : process.platform === 'darwin'
+              ? [join(home, '.Trash')]
+              : [join(process.env.XDG_DATA_HOME ?? join(home, '.local', 'share'), 'Trash', 'files'), join(home, '.local', 'share', 'Trash', 'files')];
+          const before = new Set(trashRoots.flatMap((root) => [...walk(root)]));
+          const cancelled = spawnSync(binary, ['scan', fixture], { input: 'n\n', encoding: 'utf8' });
+          if (cancelled.status !== 0) throw new Error(`N smoke test failed: ${cancelled.stderr}`);
+          if (!existsSync(join(fixture, 'node_modules'))) throw new Error('N confirmation removed disposable target');
+          const confirmed = spawnSync(binary, ['scan', fixture], { input: 'y\n', encoding: 'utf8' });
+          if (confirmed.status !== 0) throw new Error(`y smoke test failed: ${confirmed.stderr}`);
+          if (existsSync(join(fixture, 'node_modules'))) throw new Error('y confirmation did not move node_modules');
+          if (!existsSync(join(fixture, 'unrelated-fixture', 'keep.txt'))) throw new Error('unrelated fixture was changed');
+          const after = new Set(trashRoots.flatMap((root) => [...walk(root)]));
+          const moved = [...after].some((entry) => !before.has(entry));
+          if (!moved) throw new Error(`target was not observed in system Trash (${trashRoots.join(', ')})`);
+          console.log('Smoke test verified N preservation, lowercase y cleanup, system Trash movement, and unrelated fixture preservation.');
+          NODE
 
       - name: Preview package contents
         shell: bash

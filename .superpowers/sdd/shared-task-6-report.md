@@ -65,3 +65,59 @@ or placed in Cargo metadata, URLs, lockfiles, or generated artifacts.
   version tag matching all package versions, for example `v0.1.0`.
 - Local platform package previews contain manifests only because release
   binaries are intentionally not committed or generated for publication here.
+
+## Review Fixes
+
+### Checksum verification
+
+The workflow now computes SHA-256 for the release binary before staging, stores
+that digest through `GITHUB_ENV`, stages the binary, computes SHA-256 again from
+the staged package path, and fails when the values differ. It no longer writes a
+checksum generated from the same file and compares that file to itself.
+
+### Smoke fixture
+
+The smoke test creates a disposable project with valid root and nested package
+`package.json` files, a `node_modules` target, and an unrelated fixture file. It
+runs the binary with exact lowercase `n` first and exact lowercase `y` second,
+checks cancellation preserves the target, checks confirmed cleanup removes only
+`node_modules`, confirms the unrelated file remains, and detects a new entry in
+the platform system Trash location. Fixture creation is rooted in
+`RUNNER_TEMP` and uses Node APIs plus platform-specific Trash roots for Windows,
+macOS, and Linux.
+
+### Staging path hardening
+
+`stage-platform-package.mjs` now rejects symlink components in the package and
+`bin` paths before directory creation or copy. It validates lexical containment,
+rechecks components after directory creation, resolves real paths, and enforces
+real containment before writing. Regression tests cover symlinked package and
+`bin` directories and verify no outside file is created.
+
+### Fork pull-request limitation
+
+Workflow and README now state that GitHub does not expose the private
+`UNCACHED_CORE_DEPLOY_KEY` to fork pull requests. Fork PR CI fails with an
+actionable message and must be run from a repository branch or trusted
+maintainer-triggered workflow. No secret access or release gate was weakened.
+
+## Review Fix Verification
+
+- `node --test test/stage-platform-package.test.mjs`: 5 passed.
+- `npm test`: 9 passed.
+- `cargo test`: 10 integration tests passed; no failures.
+- `cargo fmt --check`: passed.
+- `cargo clippy --all-targets -- -D warnings`: passed.
+- `npm pack --dry-run`: passed for root and all four platform packages.
+- `npm publish --dry-run --ignore-scripts`: passed; npm emitted its expected
+  local authentication warning and did not publish.
+- Workflow secret/permanent-delete audit: no secret values or permanent-delete
+  commands found; only named secret references and actionable messages remain.
+- `git diff --check`: passed.
+
+## Remaining Concerns
+
+- GitHub Actions runner execution was not available locally, so native Trash
+  provider behavior and fork-event secret handling still require CI validation.
+- Real release remains gated on repository configuration for named secrets and
+  matching version tags; no package was published.

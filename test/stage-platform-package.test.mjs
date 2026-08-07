@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, stat, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readFile, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFile } from 'node:child_process';
@@ -53,4 +53,38 @@ test('rejects missing binary and unknown target without creating files', async (
   assert.notEqual(unknown.code, 0);
   await assert.rejects(stat(join(packageDir, 'bin')));
   assert.equal(await readFile(join(root, 'outside.txt'), 'utf8'), 'must remain untouched');
+});
+
+test('rejects a symlinked package directory before writing', async (t) => {
+  const { root, binary } = await fixture();
+  const realPackage = join(root, 'real-package');
+  const packageDir = join(root, 'package-link');
+  await mkdir(realPackage);
+  try {
+    await symlink(realPackage, packageDir, process.platform === 'win32' ? 'junction' : 'dir');
+  } catch (error) {
+    if (error.code === 'EPERM' || error.code === 'EACCES') return t.skip('symlink creation unavailable');
+    throw error;
+  }
+
+  const result = await runStage(['--target', 'x86_64-unknown-linux-gnu', '--binary', binary, '--package-dir', packageDir]);
+  assert.notEqual(result.code, 0);
+  await assert.rejects(lstat(join(realPackage, 'bin')));
+});
+
+test('rejects a symlinked bin directory before writing', async (t) => {
+  const { root, binary, packageDir } = await fixture();
+  const outside = join(root, 'outside-bin');
+  await mkdir(outside);
+  await mkdir(packageDir);
+  try {
+    await symlink(outside, join(packageDir, 'bin'), process.platform === 'win32' ? 'junction' : 'dir');
+  } catch (error) {
+    if (error.code === 'EPERM' || error.code === 'EACCES') return t.skip('symlink creation unavailable');
+    throw error;
+  }
+
+  const result = await runStage(['--target', 'x86_64-unknown-linux-gnu', '--binary', binary, '--package-dir', packageDir]);
+  assert.notEqual(result.code, 0);
+  await assert.rejects(lstat(join(outside, 'uncached')));
 });
