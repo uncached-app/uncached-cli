@@ -2,7 +2,7 @@
 
 ## Status
 
-Implemented npm launcher migration at Rust CLI commit `dbe5375`.
+Implemented npm launcher migration at Rust CLI commit `3867c3b`.
 
 ## Package Mapping
 
@@ -58,7 +58,3 @@ remain included. Rust source, `target/`, tests, docs, old JS implementation,
   package can execute on supported hosts.
 - The launcher resolves the stable package path `bin/uncached`; release CI must
   preserve that path and executable permissions for Unix artifacts.
-
-## Correction
-
-Implementation commit is `3867c3b`, not `dbe5375`.
