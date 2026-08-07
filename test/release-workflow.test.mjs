@@ -45,7 +45,7 @@ test('packs and installs root launcher with matching staged platform package bef
 test('keeps core private, immutable, and outside crates.io publication', async () => {
   const workflow = await readFile(workflowPath, 'utf8');
   const cargo = await readFile(new URL('../Cargo.toml', import.meta.url), 'utf8');
-  assert.match(cargo, /uncached-core\s*=\s*\{\s*git\s*=\s*"ssh:\/\/git@github\.com\/natanvianasp\/uncached\.git"/);
+  assert.match(cargo, /uncached-core\s*=\s*\{\s*git\s*=\s*"ssh:\/\/git@github\.com\/uncached-app\/uncached-core\.git"/);
   assert.match(cargo, /rev\s*=\s*"[0-9a-f]{40}"/);
   assert.doesNotMatch(cargo, /uncached-core\s*=\s*\{\s*version:/);
   assert.doesNotMatch(workflow, /cargo\s+publish/);
