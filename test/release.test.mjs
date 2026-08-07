@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { promisify } from 'node:util';
 import { lstat, mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -33,7 +32,7 @@ function runNpm(args, options = {}) {
   });
 }
 
-test('packed installed executable cancels without changing targets', async (t) => {
+test('packed installed executable moves disposable targets with lowercase y', async (t) => {
   const tempRoot = await mkdtemp(path.join(tmpdir(), 'uncached-release-'));
   t.after(() => rm(tempRoot, { recursive: true, force: true }));
 
@@ -54,10 +53,10 @@ test('packed installed executable cancels without changing targets', async (t) =
 
   const result = await runNpm([
     'exec', '--prefix', installRoot, '--', 'uncached', 'scan', workspace,
-  ], { cwd: installRoot, input: 'N\n' }).catch((error) => error);
+  ], { cwd: installRoot, input: 'y\n' }).catch((error) => error);
 
   assert.equal(result.code, 0);
-  assert.match(result.stdout, /Cancelled/);
-  assert.equal((await lstat(path.join(workspace, 'one', 'node_modules'))).isDirectory(), true);
-  assert.equal((await lstat(path.join(workspace, 'two', 'node_modules'))).isDirectory(), true);
+  assert.match(result.stdout, /Moved: 2; failed: 0/);
+  await assert.rejects(lstat(path.join(workspace, 'one', 'node_modules')), { code: 'ENOENT' });
+  await assert.rejects(lstat(path.join(workspace, 'two', 'node_modules')), { code: 'ENOENT' });
 });

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { createInterface } from 'node:readline/promises';
-import { lstat } from 'node:fs/promises';
+import { lstat, realpath } from 'node:fs/promises';
 import { stdin, stdout } from 'node:process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
@@ -12,21 +12,57 @@ function printUsage(write) {
   write('Usage: uncached scan [workspace]\n');
 }
 
-async function isSafeTarget(workspace, targetPath) {
-  const resolvedTarget = path.resolve(targetPath);
-  const relativeTarget = path.relative(workspace, resolvedTarget);
-  if (relativeTarget === '' || relativeTarget.startsWith(`..${path.sep}`) || path.isAbsolute(relativeTarget)) {
-    return false;
+function formatError(error) {
+  return String(error?.message ?? error);
+}
+
+function isContained(parent, child) {
+  const relative = path.relative(parent, child);
+  return relative !== '' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
+}
+
+async function hasNoSymlinkComponents(filePath) {
+  const resolvedPath = path.resolve(filePath);
+  const components = [];
+  let current = resolvedPath;
+  while (current !== path.parse(current).root) {
+    components.push(current);
+    current = path.dirname(current);
   }
-  if (path.basename(resolvedTarget) !== 'node_modules') return false;
+  components.push(path.parse(resolvedPath).root);
+
+  for (const component of components.reverse()) {
+    const stats = await lstat(component);
+    if (stats.isSymbolicLink()) return false;
+  }
+  return true;
+}
+
+export async function isSafeTarget(workspace, targetPath, scanWorkspaceRealPath) {
+  const resolvedWorkspace = path.resolve(workspace);
+  const resolvedTarget = path.resolve(targetPath);
 
   try {
+    if (!(await hasNoSymlinkComponents(resolvedWorkspace))
+      || !(await hasNoSymlinkComponents(resolvedTarget))) return false;
+
+    const workspaceStats = await lstat(resolvedWorkspace);
+    if (!workspaceStats.isDirectory() || workspaceStats.isSymbolicLink()) return false;
+    const currentRealWorkspace = await realpath(resolvedWorkspace);
+    if (scanWorkspaceRealPath && path.relative(scanWorkspaceRealPath, currentRealWorkspace) !== '') return false;
+    if (scanWorkspaceRealPath && path.relative(currentRealWorkspace, scanWorkspaceRealPath) !== '') return false;
+
+    const realTarget = await realpath(resolvedTarget);
+    const realParent = await realpath(path.dirname(resolvedTarget));
+    if (!isContained(currentRealWorkspace, realTarget)) return false;
+    if (path.basename(realTarget) !== 'node_modules') return false;
+
     const targetStats = await lstat(resolvedTarget);
     if (!targetStats.isDirectory() || targetStats.isSymbolicLink()) return false;
-    const packageStats = await lstat(path.join(path.dirname(resolvedTarget), 'package.json'));
+    const packageStats = await lstat(path.join(realParent, 'package.json'));
     return packageStats.isFile() && !packageStats.isSymbolicLink();
   } catch (error) {
-    if (error.code === 'ENOENT') return false;
+    if (error?.code === 'ENOENT') return false;
     throw error;
   }
 }
@@ -56,11 +92,14 @@ export async function runCli(arguments_, dependencies = {}) {
   }
 
   const workspace = arguments_.length === 2 ? arguments_[1] : cwd;
+  const resolvedWorkspace = path.resolve(workspace);
+  let scanWorkspaceRealPath;
   let result;
   try {
+    if (validateTarget === isSafeTarget) scanWorkspaceRealPath = await realpath(resolvedWorkspace);
     result = await scan(workspace);
   } catch (error) {
-    write(`Scan failed: ${error.message}\n`);
+    write(`Scan failed: ${formatError(error)}\n`);
     return 1;
   }
 
@@ -78,7 +117,7 @@ export async function runCli(arguments_, dependencies = {}) {
   try {
     answer = await confirm();
   } catch (error) {
-    write(`Confirmation failed: ${error.message}\n`);
+    write(`Confirmation failed: ${formatError(error)}\n`);
     return 1;
   }
   if (answer !== 'y') {
@@ -91,7 +130,7 @@ export async function runCli(arguments_, dependencies = {}) {
   for (const target of result.targets) {
     let safe;
     try {
-      safe = await validateTarget(path.resolve(workspace), target.path);
+      safe = await validateTarget(resolvedWorkspace, target.path, scanWorkspaceRealPath);
     } catch (error) {
       safe = false;
     }
@@ -104,7 +143,7 @@ export async function runCli(arguments_, dependencies = {}) {
       moved += 1;
     } catch (error) {
       failed += 1;
-      write(`Failed: ${target.path}: ${error.message}\n`);
+      write(`Failed: ${target.path}: ${formatError(error)}\n`);
     }
   }
 

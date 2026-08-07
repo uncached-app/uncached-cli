@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
+import { mkdtemp, mkdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { test } from 'node:test';
-import { runCli } from '../src/cli.mjs';
+import { isSafeTarget, runCli } from '../src/cli.mjs';
 
 function harness({ scanResult, answer = 'n', moveToTrash = async () => {} }) {
   const output = [];
@@ -63,6 +66,33 @@ test('reports scan failure with nonzero status', async () => {
 
   assert.notEqual(await runCli(['scan'], testHarness.dependencies), 0);
   assert.match(testHarness.output.join(''), /scan failed.*scan unavailable/i);
+});
+
+test('formats non-Error scan, confirmation, and move failures', async () => {
+  const scanOutput = [];
+  assert.equal(await runCli(['scan'], {
+    scanWorkspace: async () => { throw { message: 'scan object' }; },
+    write: (text) => scanOutput.push(text),
+  }), 1);
+  assert.match(scanOutput.join(''), /scan object/);
+
+  const confirmationOutput = [];
+  assert.equal(await runCli(['scan'], {
+    scanWorkspace: async () => ({ targets: [{ path: '/workspace/node_modules', bytes: 1 }], totalBytes: 1 }),
+    confirm: async () => { throw 'confirmation string'; },
+    write: (text) => confirmationOutput.push(text),
+  }), 1);
+  assert.match(confirmationOutput.join(''), /confirmation string/);
+
+  const moveOutput = [];
+  assert.equal(await runCli(['scan'], {
+    scanWorkspace: async () => ({ targets: [{ path: '/workspace/node_modules', bytes: 1 }], totalBytes: 1 }),
+    confirm: async () => 'y',
+    validateTarget: async () => true,
+    moveToTrash: async () => { throw 42; },
+    write: (text) => moveOutput.push(text),
+  }), 0);
+  assert.match(moveOutput.join(''), /: 42/);
 });
 
 test('asks exactly once before moving all targets', async () => {
@@ -149,6 +179,38 @@ test('skips targets that fail revalidation before moving', async () => {
   assert.equal(await runCli(['scan'], testHarness.dependencies), 0);
   assert.deepEqual(testHarness.moveEffects, ['/workspace/b/node_modules']);
   assert.match(testHarness.output.join(''), /skipped.*a\/node_modules/i);
+});
+
+test('rejects workspace replacement with a symlink before moving', async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), 'uncached-cli-'));
+  const replacement = await mkdtemp(path.join(tmpdir(), 'uncached-cli-replacement-'));
+  t.after(() => Promise.all([
+    rm(root, { recursive: true, force: true }),
+    rm(replacement, { recursive: true, force: true }),
+  ]));
+  const target = path.join(root, 'project', 'node_modules');
+  await mkdir(target, { recursive: true });
+  await writeFile(path.join(root, 'project', 'package.json'), '{}');
+  const scanWorkspace = await realpath(root);
+  await rm(root, { recursive: true });
+  await symlink(replacement, root, 'junction');
+
+  assert.equal(await isSafeTarget(root, target, scanWorkspace), false);
+});
+
+test('rejects target ancestor replacement with a symlink', async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), 'uncached-cli-'));
+  const outside = await mkdtemp(path.join(tmpdir(), 'uncached-cli-outside-'));
+  t.after(() => Promise.all([
+    rm(root, { recursive: true, force: true }),
+    rm(outside, { recursive: true, force: true }),
+  ]));
+  await writeFile(path.join(root, 'package.json'), '{}');
+  await mkdir(path.join(outside, 'project', 'node_modules'), { recursive: true });
+  await writeFile(path.join(outside, 'project', 'package.json'), '{}');
+  await symlink(outside, path.join(root, 'project'), 'junction');
+
+  assert.equal(await isSafeTarget(root, path.join(root, 'project', 'node_modules'), await realpath(root)), false);
 });
 
 test('lowercase y moves every target', async () => {
