@@ -81,7 +81,7 @@ Fixed final review findings across `uncached` and `uncached-cli`.
 ### Commits
 
 - `uncached`: `5cebbd7` `perf(core): parallelize workspace traversal`
-- `uncached-cli`: recorded after report append below.
+- `uncached-cli`: `ca834ec` `ci: harden packed launcher smoke`
 
 ### Concerns
 
