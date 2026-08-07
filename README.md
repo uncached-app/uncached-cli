@@ -36,3 +36,22 @@ Run the test suite with Node's native test-file discovery:
 ```bash
 npm test
 ```
+
+## Release
+
+Real publication requires npm authentication and availability of the
+`uncached-cli` package name.
+
+```bash
+npm login
+npm version patch
+npm publish
+npx uncached scan ./path/to/workspace
+```
+
+Preview package contents and publication metadata without publishing:
+
+```bash
+npm pack --dry-run
+npm publish --dry-run
+```

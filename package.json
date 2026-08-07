@@ -2,6 +2,7 @@
   "name": "uncached-cli",
   "version": "0.1.0",
   "description": "Scan workspaces and move node_modules directories to the system Trash.",
+  "license": "MIT",
   "type": "module",
   "bin": {
     "uncached": "src/cli.mjs"
