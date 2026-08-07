@@ -173,13 +173,56 @@ jobs:
           smoke_root="$RUNNER_TEMP/uncached-npm-install"
           smoke_workspace="$RUNNER_TEMP/uncached-npm-fixture"
           rm -rf "$smoke_root" "$smoke_workspace"
-          mkdir -p "$smoke_root" "$smoke_workspace/node_modules/disposable-package"
-          printf '{"name":"uncached-npm-fixture","version":"1.0.0"}\n' > "$smoke_workspace/package.json"
-          printf '{"name":"disposable-package","version":"1.0.0"}\n' > "$smoke_workspace/node_modules/disposable-package/package.json"
-          npm install --prefix "$smoke_root" --no-save --ignore-scripts "$PWD/$root_tarball" "$PWD/packages/${{ matrix.package }}/$platform_tarball"
-          printf 'N\n' | (cd "$smoke_root" && npx --no-install uncached scan "$smoke_workspace")
-          test -d "$smoke_workspace/node_modules"
-          echo "Packed launcher and staged ${{ matrix.package }} passed npx scan cancellation smoke test."
+           mkdir -p "$smoke_root" "$smoke_workspace/node_modules/disposable-package" "$smoke_workspace/unrelated-fixture"
+           printf '{"name":"uncached-npm-fixture","version":"1.0.0"}\n' > "$smoke_workspace/package.json"
+           printf '{"name":"disposable-package","version":"1.0.0"}\n' > "$smoke_workspace/node_modules/disposable-package/package.json"
+           printf 'must remain\n' > "$smoke_workspace/unrelated-fixture/keep.txt"
+           npm install --prefix "$smoke_root" --no-save --ignore-scripts "$PWD/$root_tarball" "$PWD/packages/${{ matrix.package }}/$platform_tarball"
+           SMOKE_ROOT="$smoke_root" SMOKE_WORKSPACE="$smoke_workspace" node --input-type=module <<'NODE'
+           import { homedir } from 'node:os';
+           import { parse, join } from 'node:path';
+           import { existsSync, readdirSync, rmSync } from 'node:fs';
+           import { spawnSync } from 'node:child_process';
+
+           const root = process.env.SMOKE_ROOT;
+           const fixture = process.env.SMOKE_WORKSPACE;
+           const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx';
+           // Runs installed `npx --no-install uncached scan <fixture>` without registry fallback.
+           const walk = (directory) => {
+             const found = new Set();
+             if (!existsSync(directory)) return found;
+             const visit = (path) => {
+               let entries;
+               try { entries = readdirSync(path, { withFileTypes: true }); } catch { return; }
+               for (const entry of entries) {
+                 const child = join(path, entry.name);
+                 found.add(child);
+                 if (entry.isDirectory()) visit(child);
+               }
+             };
+             visit(directory);
+             return found;
+           };
+           const home = homedir();
+           const trashRoots = process.platform === 'win32'
+             ? [join(parse(home).root, '$Recycle.Bin')]
+             : process.platform === 'darwin'
+               ? [join(home, '.Trash')]
+               : [join(process.env.XDG_DATA_HOME ?? join(home, '.local', 'share'), 'Trash', 'files'), join(home, '.local', 'share', 'Trash', 'files')];
+           const before = new Set(trashRoots.flatMap((trash) => [...walk(trash)]));
+           const run = (answer) => spawnSync(npx, ['--no-install', 'uncached', 'scan', fixture], { cwd: root, input: `${answer}\n`, encoding: 'utf8' });
+           const cancelled = run('N');
+           if (cancelled.status !== 0) throw new Error(`N smoke test failed: ${cancelled.stderr}`);
+           if (!existsSync(join(fixture, 'node_modules'))) throw new Error('N confirmation removed node_modules');
+           const confirmed = run('y');
+           if (confirmed.status !== 0) throw new Error(`lowercase y smoke test failed: ${confirmed.stderr}`);
+           if (existsSync(join(fixture, 'node_modules'))) throw new Error('lowercase y did not move node_modules');
+           if (!existsSync(join(fixture, 'unrelated-fixture', 'keep.txt'))) throw new Error('unrelated fixture was changed');
+           const after = new Set(trashRoots.flatMap((trash) => [...walk(trash)]));
+           if (![...after].some((entry) => !before.has(entry))) throw new Error(`node_modules was not observed in system Trash (${trashRoots.join(', ')})`);
+           rmSync(fixture, { recursive: true, force: true });
+           console.log('Packed launcher verified N cancellation, lowercase y Trash movement, and unrelated fixture preservation.');
+           NODE
 
       - name: Preview package contents
         shell: bash

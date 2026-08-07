@@ -51,3 +51,40 @@ Fixed final review findings across `uncached` and `uncached-cli`.
 - Direct local CLI Cargo fetch against the private Git revision cannot authenticate in this environment; local Rust checks used the exact committed core path and restored the committed Git manifest/lock afterward.
 - Real npm publication was not attempted.
 - Filesystem identity is implemented on Unix using device/inode metadata. Stable cross-platform identity APIs are not exposed by the current Windows Rust standard library, so Windows retains all path, symlink, containment, and immediate revalidation defenses but has the documented residual path race.
+
+## Final Review Fixes: 2026-08-07
+
+### Changes
+
+- Replaced recursive serial `read_dir` descent in `src-tauri/crates/uncached-core/src/scanner.rs` with bounded `jwalk 0.8` traversal using a Rayon pool capped at eight workers.
+- Traversal rejects symlinks, files, and protected directories before descent; default `node_modules` targets are pruned in the parallel walker, while callback-level pruning preserves custom provider behavior.
+- Traversal entries are sorted by path before callback replay. Cancellation is checked before walking and between callbacks; `Prune` suppresses descendants and `Cancel` stops replay. Existing target results remain deterministically sorted.
+- Target directory sizing remains sequential by design to preserve existing error and result semantics; this is documented beside `scan_workspace` sizing.
+- Packed release smoke now installs root and matching platform tarballs, runs installed `npx --no-install uncached scan` with `N`, then lowercase `y`, verifies `node_modules` reaches system Trash, and verifies unrelated fixture content remains.
+- Added workflow static gates for disposable paths, lowercase confirmation, Trash verification, private SSH Git dependency pinned to a 40-character revision, deploy-key authentication, and no `cargo publish` path.
+- Added implementation plan at `docs/superpowers/plans/2026-08-07-final-review-fixes.md`.
+
+### Verification
+
+- `uncached`: `cargo fmt --check`: pass.
+- `uncached`: `cargo test --workspace`: pass, 33 desktop tests and 16 core integration tests.
+- `uncached`: `cargo clippy --workspace --all-targets -- -D warnings`: pass.
+- `uncached`: `git diff --check`: pass before commit.
+- `uncached-cli`: `node --test test/release-workflow.test.mjs`: pass, 4 tests.
+- `uncached-cli`: `npm test`: pass, 14 tests.
+- `uncached-cli`: `npm pack --dry-run`: pass; launcher-only package contents reported.
+- `uncached-cli`: `npm publish --dry-run --ignore-scripts`: pass; npm reported dry-run only and no publication occurred.
+- `uncached-cli`: `git diff --check`: pass before commit.
+- CLI workflow static audit: pass; checksum, fork/deploy-key, platform matrix, publish ordering, and secret-shape assertions remain present.
+- CLI `cargo test`, `cargo fmt --check`, and `cargo clippy --all-targets -- -D warnings`: blocked before compilation because local environment lacks deploy-key authentication for the intentionally private pinned Git revision `625e4e98d0b1dba82983b55b9a7a3de59bd88093`. This confirms the dependency is not silently falling back to crates.io or a path dependency.
+
+### Commits
+
+- `uncached`: `5cebbd7` `perf(core): parallelize workspace traversal`
+- `uncached-cli`: recorded after report append below.
+
+### Concerns
+
+- Packed binary N/y Trash smoke executes in GitHub Actions on each matrix platform; local execution was not possible without authenticated private-core fetch and platform release binary.
+- Real npm publication was not attempted. Dry-run remains gated and no `uncached-core` crates.io publication step exists.
+- CI must continue providing `UNCACHED_CORE_DEPLOY_KEY` through `webfactory/ssh-agent`; removing that secret or changing the SSH Git URL would make the intended private dependency gate fail.

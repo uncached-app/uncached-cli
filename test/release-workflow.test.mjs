@@ -33,7 +33,22 @@ test('packs and installs root launcher with matching staged platform package bef
   assert.match(workflow, /npm pack --json/);
   assert.match(workflow, /npm install --prefix[\s\S]*root_tarball[\s\S]*platform_tarball/);
   assert.match(workflow, /npx --no-install uncached scan/);
+  assert.match(workflow, /const cancelled = run\('N'\)/);
+  assert.match(workflow, /const confirmed = run\('y'\)/);
+  assert.match(workflow, /was not observed in system Trash/);
+  assert.match(workflow, /unrelated fixture was changed/);
   assert.match(workflow, /publish-platform/);
   assert.ok(workflow.indexOf('npx --no-install uncached scan') < workflow.indexOf('publish-platform'));
   assert.doesNotMatch(workflow, /CORE_DEPLOY_KEY_SECRET/);
+});
+
+test('keeps core private, immutable, and outside crates.io publication', async () => {
+  const workflow = await readFile(workflowPath, 'utf8');
+  const cargo = await readFile(new URL('../Cargo.toml', import.meta.url), 'utf8');
+  assert.match(cargo, /uncached-core\s*=\s*\{\s*git\s*=\s*"ssh:\/\/git@github\.com\/natanvianasp\/uncached\.git"/);
+  assert.match(cargo, /rev\s*=\s*"[0-9a-f]{40}"/);
+  assert.doesNotMatch(cargo, /uncached-core\s*=\s*\{\s*version:/);
+  assert.doesNotMatch(workflow, /cargo\s+publish/);
+  assert.match(workflow, /UNCACHED_CORE_DEPLOY_KEY/);
+  assert.match(workflow, /webfactory\/ssh-agent@v0\.9\.0/);
 });
