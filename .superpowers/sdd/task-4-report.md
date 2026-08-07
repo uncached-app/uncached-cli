@@ -1,65 +1,78 @@
-# Task 4 Report: CLI Flow
+# Task 4 Report: CLI Flow Review
 
 ## Scope
 
-Implemented Task 4 in the requested CLI and test files. The CLI supports only
-`scan` with zero or one workspace argument. No flags or additional commands were
-added.
+Read-only review of `de2dd01..79b2050` against Task 4 brief. No full suite was
+rerun. Checkout code was not changed; this report is the review artifact.
 
-## Implementation
+## Spec Compliance
 
-- Added executable `src/cli.mjs` wired to the existing `scanWorkspace` and
-  `moveToTrash` exports.
-- Defaults workspace to `process.cwd()` when no path is provided.
-- Rejects missing, unsupported, and overlong argument lists with usage output and
-  status `1`.
-- Prints each target path and byte size, followed by total bytes.
-- Prints an empty-scan message and exits `0` without prompting when no targets
-  are found.
-- Prompts exactly once when targets exist. Only exact lowercase `y` confirms;
-  every other response cancels with status `0`.
-- Calls `moveToTrash` once per target after confirmation.
-- Continues after move failures, reports each failed target and error message,
-  and exits `0` after the scan completes.
-- Exports `runCli` with injectable scan, move, confirmation, output, and cwd
-  boundaries so tests never move real user files.
+- `runCli` accepts `scan` with zero or one workspace argument and defaults to
+  `process.cwd()`.
+- Scan failures and argument failures return status `1`.
+- Empty scans and cancellation return status `0` without moving targets.
+- Exactly one confirmation is requested for non-empty scans; only exact
+  lowercase `y` proceeds.
+- `moveToTrash` is called once per target, and failures are reported while later
+  targets continue.
+- Human output includes target paths, byte sizes, total bytes, and move errors.
 
-## Tests
+## Strengths
 
-Added `test/cli.test.mjs` covering:
+- `src/cli.mjs:121-163` keeps parsing, scan error handling, confirmation, and
+  per-target failure continuation direct and easy to verify.
+- `test/cli.test.mjs:181-203` injects all side effects, preventing tests from
+  moving real files.
 
-- Default and explicit workspace paths.
-- Empty scans.
-- Invalid subcommands and too many arguments.
-- Confirmation cancellation.
-- Lowercase `y` moving every target.
-- A failed move followed by later move attempts.
-- Human-readable target, size, total, and failure output.
+## Issues By Severity
 
-## TDD Evidence
+### Critical
 
-The focused suite was run before `src/cli.mjs` existed:
+None.
 
-```text
-node --test test/cli.test.mjs
-ERR_MODULE_NOT_FOUND: ...\\src\\cli.mjs
-```
+### High
 
-After the minimal implementation, focused tests passed.
+None.
 
-## Verification
+### Medium
 
-```text
-node --test test/cli.test.mjs
-7 passed, 0 failed
+- `src/cli.mjs:84-90`: `src/cli.mjs` is added with mode `100644`, so the
+  shebang file is not executable when invoked through a POSIX bin link that
+  preserves package file mode. Set executable mode (`100755`) before shipping
+  the `uncached` bin.
 
-npm test
-15 passed, 0 failed
-```
+### Low
 
-## Concerns
+- `test/cli.test.mjs:206-306`: tests omit scan-failure status/output and do not
+  assert exactly one confirmation for a non-empty scan. Add focused cases for
+  both brief requirements.
 
-- Move failures are intentionally nonfatal per brief; command status remains
-  `0` after a successful scan even when one or more targets fail.
-- CLI output uses raw byte counts rather than human-size formatting to keep
-  output deterministic and avoid adding an unrequested formatting feature.
+## Assessment
+
+Pass with medium packaging fix recommended. Runtime flow complies with brief;
+test coverage has a low-severity gap. No full-suite verification performed per
+request.
+
+## Fix Report
+
+### Changes
+
+- Changed `src/cli.mjs` from mode `100644` to executable mode `100755` so the
+  shebang works through the POSIX npm bin link.
+- Added `test/cli.test.mjs` coverage asserting scan failure returns nonzero
+  status and includes failure text in output.
+- Added `test/cli.test.mjs` coverage asserting one confirmation call for a
+  non-empty scan while all targets are moved after lowercase `y`.
+- Kept runtime implementation and Task 4 scope unchanged.
+
+### Verification
+
+Command: `node --test test/cli.test.mjs`
+
+Result: 9 tests passed, 0 failed.
+
+Command: `npm test`
+
+Result: 17 tests passed, 0 failed.
+
+Executable mode verification: `src/cli.mjs` is staged as `100755`.

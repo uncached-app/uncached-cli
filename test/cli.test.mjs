@@ -53,6 +53,35 @@ test('scans explicit workspace path', async () => {
   assert.deepEqual(testHarness.scanned, ['./project']);
 });
 
+test('reports scan failure with nonzero status', async () => {
+  const testHarness = harness({ scanResult: new Error('scan unavailable') });
+
+  assert.notEqual(await runCli(['scan'], testHarness.dependencies), 0);
+  assert.match(testHarness.output.join(''), /scan failed.*scan unavailable/i);
+});
+
+test('asks exactly once before moving all targets', async () => {
+  let confirmations = 0;
+  const testHarness = harness({
+    answer: 'y',
+    scanResult: {
+      targets: [
+        { path: '/workspace/a/node_modules', bytes: 10 },
+        { path: '/workspace/b/node_modules', bytes: 20 },
+      ],
+      totalBytes: 30,
+    },
+  });
+  testHarness.dependencies.confirm = async () => {
+    confirmations += 1;
+    return 'y';
+  };
+
+  assert.equal(await runCli(['scan'], testHarness.dependencies), 0);
+  assert.equal(confirmations, 1);
+  assert.equal(testHarness.moved.length, 2);
+});
+
 test('prints empty scan without asking for confirmation', async () => {
   let confirmations = 0;
   const testHarness = harness({ scanResult: { targets: [], totalBytes: 0 } });
