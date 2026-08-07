@@ -55,3 +55,14 @@ Preview package contents and publication metadata without publishing:
 npm pack --dry-run
 npm publish --dry-run
 ```
+
+Test the packed CLI in a disposable project before publishing:
+
+```bash
+npm pack
+mkdir ../uncached-cli-disposable
+cd ../uncached-cli-disposable
+npm init -y
+npm install ../uncached-cli/uncached-cli-0.1.0.tgz
+npx uncached scan .
+```
