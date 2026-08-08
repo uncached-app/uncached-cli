@@ -111,7 +111,7 @@ fn rejects_invalid_command_and_extra_workspace() {
 }
 
 #[test]
-fn prints_each_target_and_total_for_non_empty_scan() {
+fn prints_each_target_path_for_non_empty_scan() {
     let first = target("/workspace/a/node_modules", 12);
     let second = target("/workspace/b/node_modules", 30);
     let report = ScanReport {
@@ -126,9 +126,7 @@ fn prints_each_target_and_total_for_non_empty_scan() {
     );
     assert_eq!(status, 0);
     assert!(stdout.contains("/workspace/a/node_modules"));
-    assert!(stdout.contains("12 bytes"));
     assert!(stdout.contains("/workspace/b/node_modules"));
-    assert!(stdout.contains("Total: 42 bytes"));
 }
 
 #[test]

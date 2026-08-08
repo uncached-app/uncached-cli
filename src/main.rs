@@ -2,7 +2,10 @@ use std::io::{self, Write};
 use std::path::Path;
 use std::sync::atomic::AtomicBool;
 use uncached_cli_bin::run_with_dependencies;
-use uncached_core::{clean_to_trash, scan_workspace, ProviderSet};
+use uncached_core::{
+    clean_to_trash, traverse_workspace, ProviderSet, ScanOutcome, ScanReport, ScanTarget,
+    TraversalControl, TraversalOutcome,
+};
 
 fn main() {
     let workspace = std::env::current_dir().unwrap_or_else(|error| {
@@ -16,8 +19,26 @@ fn main() {
         &workspace,
         |root: &Path| {
             let cancelled = AtomicBool::new(false);
-            scan_workspace(root, &ProviderSet::free(), &cancelled)
-                .map_err(|error| error.to_string())
+            let mut candidates = Vec::new();
+            let outcome = traverse_workspace(root, &ProviderSet::free(), &cancelled, |entry| {
+                if let Some(category) = entry.category.clone() {
+                    candidates.push(
+                        ScanTarget::new(entry.path.clone(), category, 0)
+                            .with_identity(entry.identity),
+                    );
+                    TraversalControl::Prune
+                } else {
+                    TraversalControl::Continue
+                }
+            })
+            .map_err(|error| error.to_string())?;
+            match outcome {
+                TraversalOutcome::Cancelled => Ok(ScanOutcome::Cancelled),
+                TraversalOutcome::Completed => Ok(ScanOutcome::Completed(ScanReport {
+                    targets: candidates,
+                    total_bytes: 0,
+                })),
+            }
         },
         |root, target| {
             clean_to_trash(root, &ProviderSet::free(), target)

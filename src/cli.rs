@@ -43,14 +43,8 @@ where
     };
 
     for target in &report.targets {
-        let _ = writeln!(
-            output,
-            "{} ({} bytes)",
-            target.path.display(),
-            target.size_bytes
-        );
+        let _ = writeln!(output, "{}", target.path.display());
     }
-    let _ = writeln!(output, "Total: {} bytes", report.total_bytes);
     if report.targets.is_empty() {
         return 0;
     }
@@ -72,12 +66,7 @@ where
     for target in &report.targets {
         match clean(workspace, target) {
             Ok(()) => {
-                let _ = writeln!(
-                    output,
-                    "Moved {} ({} bytes)",
-                    target.path.display(),
-                    target.size_bytes
-                );
+                let _ = writeln!(output, "Moved {}", target.path.display());
             }
             Err(error) => {
                 let _ = writeln!(errors, "Failed to move {}: {error}", target.path.display());
