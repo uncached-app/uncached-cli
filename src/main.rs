@@ -1,5 +1,6 @@
 use std::io::{self, Write};
 use std::path::Path;
+use std::sync::atomic::AtomicBool;
 use uncached_cli_bin::run_with_dependencies;
 use uncached_core::{clean_to_trash, scan_workspace, ProviderSet};
 
@@ -13,7 +14,11 @@ fn main() {
     let status = run_with_dependencies(
         std::env::args().skip(1),
         &workspace,
-        |root: &Path| scan_workspace(root, &ProviderSet::free()).map_err(|error| error.to_string()),
+        |root: &Path| {
+            let cancelled = AtomicBool::new(false);
+            scan_workspace(root, &ProviderSet::free(), &cancelled)
+                .map_err(|error| error.to_string())
+        },
         |root, target| {
             clean_to_trash(root, target)
                 .map(|_| ())

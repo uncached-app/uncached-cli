@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use uncached_cli_bin::run_with_dependencies;
-use uncached_core::{Category, ScanReport, ScanTarget};
+use uncached_core::{Category, ScanOutcome, ScanReport, ScanTarget};
 
 struct FlushTrackingWriter {
     bytes: Vec<u8>,
@@ -26,7 +26,7 @@ fn target(path: impl Into<PathBuf>, size_bytes: u64) -> ScanTarget {
 
 fn run(
     args: &[&str],
-    scan: impl FnMut(&Path) -> Result<ScanReport, String>,
+    scan: impl FnMut(&Path) -> Result<ScanOutcome, String>,
     clean: impl FnMut(&Path, &ScanTarget) -> Result<(), String>,
     answer: &str,
 ) -> (i32, String, String) {
@@ -36,7 +36,7 @@ fn run(
 fn run_at(
     workspace: &Path,
     args: &[&str],
-    scan: impl FnMut(&Path) -> Result<ScanReport, String>,
+    scan: impl FnMut(&Path) -> Result<ScanOutcome, String>,
     clean: impl FnMut(&Path, &ScanTarget) -> Result<(), String>,
     answer: &str,
 ) -> (i32, String, String) {
@@ -65,10 +65,10 @@ fn defaults_workspace_to_current_directory() {
         &["scan"],
         |workspace| {
             seen = Some(workspace.to_path_buf());
-            Ok(ScanReport {
+            Ok(ScanOutcome::Completed(ScanReport {
                 targets: Vec::new(),
                 total_bytes: 0,
-            })
+            }))
         },
         |_, _| panic!("empty scan must not clean"),
         "N",
@@ -84,10 +84,10 @@ fn passes_explicit_workspace_to_core() {
         &["scan", "./fixture"],
         |workspace| {
             seen = Some(workspace.to_path_buf());
-            Ok(ScanReport {
+            Ok(ScanOutcome::Completed(ScanReport {
                 targets: Vec::new(),
                 total_bytes: 0,
-            })
+            }))
         },
         |_, _| panic!("empty scan must not clean"),
         "N",
@@ -118,7 +118,12 @@ fn prints_each_target_and_total_for_non_empty_scan() {
         targets: vec![first, second],
         total_bytes: 42,
     };
-    let (status, stdout, _) = run(&["scan"], |_| Ok(report.clone()), |_, _| Ok(()), "N");
+    let (status, stdout, _) = run(
+        &["scan"],
+        |_| Ok(ScanOutcome::Completed(report.clone())),
+        |_, _| Ok(()),
+        "N",
+    );
     assert_eq!(status, 0);
     assert!(stdout.contains("/workspace/a/node_modules"));
     assert!(stdout.contains("12 bytes"));
@@ -136,10 +141,10 @@ fn asks_once_and_cleans_every_target_after_exact_lowercase_y() {
     let (status, stdout, _) = run(
         &["scan"],
         |_| {
-            Ok(ScanReport {
+            Ok(ScanOutcome::Completed(ScanReport {
                 targets: targets.clone(),
                 total_bytes: 3,
-            })
+            }))
         },
         |_, item| {
             cleaned.borrow_mut().push(item.path.clone());
@@ -170,10 +175,10 @@ fn flushes_confirmation_prompt_before_reading_answer() {
         ["scan"].iter().copied(),
         Path::new("/workspace"),
         |_| {
-            Ok(ScanReport {
+            Ok(ScanOutcome::Completed(ScanReport {
                 targets: vec![target("/workspace/node_modules", 1)],
                 total_bytes: 1,
-            })
+            }))
         },
         |_, _| Ok(()),
         || {
@@ -192,10 +197,10 @@ fn cancellation_preserves_targets() {
     let (status, _, _) = run(
         &["scan"],
         |_| {
-            Ok(ScanReport {
+            Ok(ScanOutcome::Completed(ScanReport {
                 targets: vec![target("/workspace/a/node_modules", 1)],
                 total_bytes: 1,
-            })
+            }))
         },
         |_, _| {
             cleaned.set(cleaned.get() + 1);
@@ -208,14 +213,33 @@ fn cancellation_preserves_targets() {
 }
 
 #[test]
+fn core_cancellation_returns_success_without_report_or_cleanup() {
+    let cleaned = std::cell::Cell::new(0);
+    let (status, stdout, stderr) = run(
+        &["scan"],
+        |_| Ok(ScanOutcome::Cancelled),
+        |_, _| {
+            cleaned.set(cleaned.get() + 1);
+            Ok(())
+        },
+        "y",
+    );
+
+    assert_eq!(status, 0);
+    assert_eq!(cleaned.get(), 0);
+    assert!(stdout.is_empty());
+    assert!(stderr.is_empty());
+}
+
+#[test]
 fn prints_cancellation_status_for_explicit_non_y_answer() {
     let (status, stdout, stderr) = run(
         &["scan"],
         |_| {
-            Ok(ScanReport {
+            Ok(ScanOutcome::Completed(ScanReport {
                 targets: vec![target("/workspace/node_modules", 1)],
                 total_bytes: 1,
-            })
+            }))
         },
         |_, _| panic!("explicit cancellation must not clean"),
         "N",
@@ -231,10 +255,10 @@ fn confirmation_read_error_is_nonzero_and_concise() {
     let (status, _, stderr) = run_with_confirmation(
         &["scan"],
         |_| {
-            Ok(ScanReport {
+            Ok(ScanOutcome::Completed(ScanReport {
                 targets: vec![target("/workspace/node_modules", 1)],
                 total_bytes: 1,
-            })
+            }))
         },
         |_, _| panic!("confirmation error must not clean"),
         || {
@@ -257,7 +281,7 @@ fn run_with_confirmation<S, C, Q>(
     confirm: Q,
 ) -> (i32, String, String)
 where
-    S: FnMut(&Path) -> Result<ScanReport, String>,
+    S: FnMut(&Path) -> Result<ScanOutcome, String>,
     C: FnMut(&Path, &ScanTarget) -> Result<(), String>,
     Q: FnMut() -> std::io::Result<String>,
 {
@@ -285,13 +309,13 @@ fn reports_cleanup_failure_and_continues() {
     let (status, stdout, stderr) = run(
         &["scan"],
         |_| {
-            Ok(ScanReport {
+            Ok(ScanOutcome::Completed(ScanReport {
                 targets: vec![
                     target("/workspace/a/node_modules", 1),
                     target("/workspace/b/node_modules", 2),
                 ],
                 total_bytes: 3,
-            })
+            }))
         },
         |_, item| {
             cleaned.borrow_mut().push(item.path.clone());
@@ -342,10 +366,10 @@ fn final_cleanup_boundary_rejects_replaced_target() {
         &root,
         &["scan"],
         move |_| {
-            Ok(ScanReport {
+            Ok(ScanOutcome::Completed(ScanReport {
                 targets: vec![report_target.clone()],
                 total_bytes: 0,
-            })
+            }))
         },
         move |workspace, item| {
             uncached_core::validate_clean_target(workspace, item)

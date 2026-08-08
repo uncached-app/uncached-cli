@@ -1,6 +1,6 @@
 use std::io::Write;
 use std::path::Path;
-use uncached_core::{ScanReport, ScanTarget};
+use uncached_core::{ScanOutcome, ScanTarget};
 
 pub fn run_with_dependencies<I, S, C, Q, O, E>(
     args: I,
@@ -14,7 +14,7 @@ pub fn run_with_dependencies<I, S, C, Q, O, E>(
 where
     I: IntoIterator,
     I::Item: AsRef<str>,
-    S: FnMut(&Path) -> Result<ScanReport, String>,
+    S: FnMut(&Path) -> Result<ScanOutcome, String>,
     C: FnMut(&Path, &ScanTarget) -> Result<(), String>,
     Q: FnMut() -> std::io::Result<String>,
     O: Write,
@@ -34,7 +34,8 @@ where
     };
 
     let report = match scan(workspace) {
-        Ok(report) => report,
+        Ok(ScanOutcome::Completed(report)) => report,
+        Ok(ScanOutcome::Cancelled) => return 0,
         Err(error) => {
             let _ = writeln!(errors, "scan failed: {error}");
             return 1;
