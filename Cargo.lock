@@ -425,7 +425,7 @@ dependencies = [
 [[package]]
 name = "uncached-core"
 version = "0.1.0"
-source = "git+ssh://git@github.com/uncached-app/uncached-core.git?rev=688e719#688e719a4b9ad429655a029c34a465028d140a20"
+source = "git+ssh://git@github.com/uncached-app/uncached-core.git?rev=b402f67#b402f67096b87d06da247294c42718d928ab0b0f"
 dependencies = [
  "jwalk",
  "serde",

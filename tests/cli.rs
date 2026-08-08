@@ -372,9 +372,13 @@ fn final_cleanup_boundary_rejects_replaced_target() {
             }))
         },
         move |workspace, item| {
-            uncached_core::validate_clean_target(workspace, item)
-                .map(|_| ())
-                .map_err(|error| error.to_string())
+            uncached_core::validate_clean_target(
+                workspace,
+                &uncached_core::ProviderSet::free(),
+                item,
+            )
+            .map(|_| ())
+            .map_err(|error| error.to_string())
         },
         "y",
     );

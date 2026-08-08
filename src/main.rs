@@ -20,7 +20,7 @@ fn main() {
                 .map_err(|error| error.to_string())
         },
         |root, target| {
-            clean_to_trash(root, target)
+            clean_to_trash(root, &ProviderSet::free(), target)
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         },
