@@ -1,10 +1,9 @@
 use std::io::{self, Write};
 use std::path::Path;
 use std::sync::atomic::AtomicBool;
-use uncached_cli_bin::run_with_dependencies;
+use uncached_cli_bin::{run_with_dependencies, ScanOutcome, ScanReport};
 use uncached_core::{
-    clean_to_trash, traverse_workspace, ProviderSet, ScanOutcome, ScanReport, ScanTarget,
-    TraversalControl, TraversalOutcome,
+    clean_to_trash, traverse_workspace, ProviderSet, ScanTarget, TraversalControl, TraversalOutcome,
 };
 
 fn main() {

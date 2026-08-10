@@ -1,7 +1,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use uncached_cli_bin::run_with_dependencies;
-use uncached_core::{Category, ScanOutcome, ScanReport, ScanTarget};
+use uncached_cli_bin::{ScanOutcome, ScanReport};
+use uncached_core::{Category, ScanTarget};
 
 struct FlushTrackingWriter {
     bytes: Vec<u8>,

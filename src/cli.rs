@@ -1,6 +1,17 @@
 use std::io::Write;
 use std::path::Path;
-use uncached_core::{ScanOutcome, ScanTarget};
+use uncached_core::ScanTarget;
+
+#[derive(Debug, Clone)]
+pub struct ScanReport {
+    pub targets: Vec<ScanTarget>,
+    pub total_bytes: u64,
+}
+
+pub enum ScanOutcome {
+    Completed(ScanReport),
+    Cancelled,
+}
 
 pub fn run_with_dependencies<I, S, C, Q, O, E>(
     args: I,
