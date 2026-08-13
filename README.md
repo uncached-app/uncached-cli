@@ -28,6 +28,25 @@ The launcher forwards all arguments to the packaged Rust executable. Runtime
 scanning, validation, confirmation, and Trash behavior belong to Rust
 `uncached-core` and the Rust CLI, not JavaScript.
 
+The scan sizes every build artifact it finds and cleans `node_modules` only.
+Other categories are reported so the total on screen is the real total:
+
+```
+~/Projects/web/node_modules      2.10 GB
+~/Projects/api/node_modules    840.00 MB
+
+2 targets, 2.92 GB reclaimable
+
+Move all targets to Trash? [y/N] y
+Moved ~/Projects/web/node_modules
+Moved ~/Projects/api/node_modules
+
+Reclaimed 2.92 GB from 2 targets.
+
+Found 34.50 GB more in Cargo target, .next, .gradle.
+The Uncached app cleans those too: https://uncached.app
+```
+
 ## Local Development
 
 ```bash

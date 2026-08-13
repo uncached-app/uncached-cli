@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use uncached_cli_bin::run_with_dependencies;
-use uncached_cli_bin::{ScanOutcome, ScanReport};
+use uncached_cli_bin::{DesktopOnlyFinding, ScanOutcome, ScanReport};
 use uncached_core::{Category, ScanTarget};
 
 struct FlushTrackingWriter {
@@ -23,6 +23,14 @@ impl std::io::Write for FlushTrackingWriter {
 
 fn target(path: impl Into<PathBuf>, size_bytes: u64) -> ScanTarget {
     ScanTarget::new(path.into(), Category::NodeModules, size_bytes)
+}
+
+fn report(targets: Vec<ScanTarget>, total_bytes: u64) -> ScanReport {
+    ScanReport {
+        targets,
+        total_bytes,
+        ..ScanReport::default()
+    }
 }
 
 fn run(
@@ -66,10 +74,7 @@ fn defaults_workspace_to_current_directory() {
         &["scan"],
         |workspace| {
             seen = Some(workspace.to_path_buf());
-            Ok(ScanOutcome::Completed(ScanReport {
-                targets: Vec::new(),
-                total_bytes: 0,
-            }))
+            Ok(ScanOutcome::Completed(report(Vec::new(), 0)))
         },
         |_, _| panic!("empty scan must not clean"),
         "N",
@@ -85,10 +90,7 @@ fn passes_explicit_workspace_to_core() {
         &["scan", "./fixture"],
         |workspace| {
             seen = Some(workspace.to_path_buf());
-            Ok(ScanOutcome::Completed(ScanReport {
-                targets: Vec::new(),
-                total_bytes: 0,
-            }))
+            Ok(ScanOutcome::Completed(report(Vec::new(), 0)))
         },
         |_, _| panic!("empty scan must not clean"),
         "N",
@@ -115,10 +117,7 @@ fn rejects_invalid_command_and_extra_workspace() {
 fn prints_each_target_path_for_non_empty_scan() {
     let first = target("/workspace/a/node_modules", 12);
     let second = target("/workspace/b/node_modules", 30);
-    let report = ScanReport {
-        targets: vec![first, second],
-        total_bytes: 42,
-    };
+    let report = report(vec![first, second], 42);
     let (status, stdout, _) = run(
         &["scan"],
         |_| Ok(ScanOutcome::Completed(report.clone())),
@@ -139,12 +138,7 @@ fn asks_once_and_cleans_every_target_after_exact_lowercase_y() {
     let cleaned = std::cell::RefCell::new(Vec::new());
     let (status, stdout, _) = run(
         &["scan"],
-        |_| {
-            Ok(ScanOutcome::Completed(ScanReport {
-                targets: targets.clone(),
-                total_bytes: 3,
-            }))
-        },
+        |_| Ok(ScanOutcome::Completed(report(targets.clone(), 3))),
         |_, item| {
             cleaned.borrow_mut().push(item.path.clone());
             Ok(())
@@ -174,10 +168,10 @@ fn flushes_confirmation_prompt_before_reading_answer() {
         ["scan"].iter().copied(),
         Path::new("/workspace"),
         |_| {
-            Ok(ScanOutcome::Completed(ScanReport {
-                targets: vec![target("/workspace/node_modules", 1)],
-                total_bytes: 1,
-            }))
+            Ok(ScanOutcome::Completed(report(
+                vec![target("/workspace/node_modules", 1)],
+                1,
+            )))
         },
         |_, _| Ok(()),
         || {
@@ -196,10 +190,10 @@ fn cancellation_preserves_targets() {
     let (status, _, _) = run(
         &["scan"],
         |_| {
-            Ok(ScanOutcome::Completed(ScanReport {
-                targets: vec![target("/workspace/a/node_modules", 1)],
-                total_bytes: 1,
-            }))
+            Ok(ScanOutcome::Completed(report(
+                vec![target("/workspace/a/node_modules", 1)],
+                1,
+            )))
         },
         |_, _| {
             cleaned.set(cleaned.get() + 1);
@@ -235,10 +229,10 @@ fn prints_cancellation_status_for_explicit_non_y_answer() {
     let (status, stdout, stderr) = run(
         &["scan"],
         |_| {
-            Ok(ScanOutcome::Completed(ScanReport {
-                targets: vec![target("/workspace/node_modules", 1)],
-                total_bytes: 1,
-            }))
+            Ok(ScanOutcome::Completed(report(
+                vec![target("/workspace/node_modules", 1)],
+                1,
+            )))
         },
         |_, _| panic!("explicit cancellation must not clean"),
         "N",
@@ -254,10 +248,10 @@ fn confirmation_read_error_is_nonzero_and_concise() {
     let (status, _, stderr) = run_with_confirmation(
         &["scan"],
         |_| {
-            Ok(ScanOutcome::Completed(ScanReport {
-                targets: vec![target("/workspace/node_modules", 1)],
-                total_bytes: 1,
-            }))
+            Ok(ScanOutcome::Completed(report(
+                vec![target("/workspace/node_modules", 1)],
+                1,
+            )))
         },
         |_, _| panic!("confirmation error must not clean"),
         || {
@@ -308,13 +302,13 @@ fn reports_cleanup_failure_and_continues() {
     let (status, stdout, stderr) = run(
         &["scan"],
         |_| {
-            Ok(ScanOutcome::Completed(ScanReport {
-                targets: vec![
+            Ok(ScanOutcome::Completed(report(
+                vec![
                     target("/workspace/a/node_modules", 1),
                     target("/workspace/b/node_modules", 2),
                 ],
-                total_bytes: 3,
-            }))
+                3,
+            )))
         },
         |_, item| {
             cleaned.borrow_mut().push(item.path.clone());
@@ -365,10 +359,10 @@ fn final_cleanup_boundary_rejects_replaced_target() {
         &root,
         &["scan"],
         move |_| {
-            Ok(ScanOutcome::Completed(ScanReport {
-                targets: vec![report_target.clone()],
-                total_bytes: 0,
-            }))
+            Ok(ScanOutcome::Completed(report(
+                vec![report_target.clone()],
+                0,
+            )))
         },
         move |workspace, item| {
             uncached_core::validate_clean_target(
@@ -384,4 +378,160 @@ fn final_cleanup_boundary_rejects_replaced_target() {
     assert_eq!(status, 0);
     assert!(stderr.contains("target"));
     fs::remove_dir_all(root).unwrap();
+}
+
+fn desktop_only(findings: &[(Category, u64, usize)]) -> Vec<DesktopOnlyFinding> {
+    findings
+        .iter()
+        .map(|(category, bytes, count)| DesktopOnlyFinding {
+            category: category.clone(),
+            bytes: *bytes,
+            count: *count,
+        })
+        .collect()
+}
+
+#[test]
+fn prints_size_per_target_and_total_before_confirmation() {
+    let (status, stdout, _) = run(
+        &["scan"],
+        |_| {
+            Ok(ScanOutcome::Completed(report(
+                vec![
+                    target("/workspace/a/node_modules", 2 * 1024 * 1024 * 1024),
+                    target("/workspace/b/node_modules", 512 * 1024 * 1024),
+                ],
+                2 * 1024 * 1024 * 1024 + 512 * 1024 * 1024,
+            )))
+        },
+        |_, _| panic!("declined cleanup must not clean"),
+        "N",
+    );
+
+    assert_eq!(status, 0);
+    assert!(stdout.contains("2.00 GB"));
+    assert!(stdout.contains("512.00 MB"));
+    assert!(stdout.contains("2 targets, 2.50 GB reclaimable"));
+    let total_index = stdout.find("reclaimable").unwrap();
+    let prompt_index = stdout.find("Move all targets").unwrap();
+    assert!(total_index < prompt_index, "total must precede the prompt");
+}
+
+#[test]
+fn reports_reclaimed_bytes_counting_only_successful_moves() {
+    let (status, stdout, stderr) = run(
+        &["scan"],
+        |_| {
+            Ok(ScanOutcome::Completed(report(
+                vec![
+                    target("/workspace/a/node_modules", 3 * 1024 * 1024),
+                    target("/workspace/b/node_modules", 1024 * 1024),
+                ],
+                4 * 1024 * 1024,
+            )))
+        },
+        |_, item| {
+            if item.path.ends_with("b/node_modules") {
+                Err("trash unavailable".into())
+            } else {
+                Ok(())
+            }
+        },
+        "y",
+    );
+
+    assert_eq!(status, 0);
+    assert!(stdout.contains("Reclaimed 3.00 MB from 1 target."));
+    assert!(stderr.contains("trash unavailable"));
+}
+
+#[test]
+fn reports_desktop_only_categories_after_the_free_cleanup() {
+    let mut scan_report = report(vec![target("/workspace/a/node_modules", 1024)], 1024);
+    scan_report.desktop_only = desktop_only(&[
+        (Category::NextJs, 2 * 1024 * 1024 * 1024, 3),
+        (Category::CargoTarget, 30 * 1024 * 1024 * 1024, 2),
+    ]);
+
+    let (status, stdout, _) = run(
+        &["scan"],
+        |_| Ok(ScanOutcome::Completed(scan_report.clone())),
+        |_, _| Ok(()),
+        "y",
+    );
+
+    assert_eq!(status, 0);
+    assert!(stdout.contains("Found 32.00 GB more in Cargo target, .next."));
+    assert!(stdout.contains("https://uncached.app"));
+    let moved_index = stdout.find("Moved").unwrap();
+    let upgrade_index = stdout.find("Found 32.00 GB more").unwrap();
+    assert!(
+        moved_index < upgrade_index,
+        "the upgrade line must never precede the free cleanup"
+    );
+}
+
+#[test]
+fn empty_free_scan_still_reports_what_the_app_would_clean() {
+    let mut scan_report = report(Vec::new(), 0);
+    scan_report.desktop_only = desktop_only(&[(Category::Gradle, 5 * 1024 * 1024 * 1024, 1)]);
+
+    let (status, stdout, _) = run(
+        &["scan"],
+        |_| Ok(ScanOutcome::Completed(scan_report.clone())),
+        |_, _| panic!("empty scan must not clean"),
+        "N",
+    );
+
+    assert_eq!(status, 0);
+    assert!(stdout.contains("No node_modules found."));
+    assert!(stdout.contains("Found 5.00 GB more in .gradle."));
+}
+
+#[test]
+fn declined_cleanup_still_reports_what_the_app_would_clean() {
+    let mut scan_report = report(vec![target("/workspace/node_modules", 1024)], 1024);
+    scan_report.desktop_only = desktop_only(&[(Category::Turbo, 1024 * 1024, 1)]);
+
+    let (status, stdout, _) = run(
+        &["scan"],
+        |_| Ok(ScanOutcome::Completed(scan_report.clone())),
+        |_, _| panic!("declined cleanup must not clean"),
+        "N",
+    );
+
+    assert_eq!(status, 0);
+    assert!(stdout.contains("Cancelled."));
+    assert!(stdout.contains("Found 1.00 MB more in .turbo."));
+}
+
+#[test]
+fn stays_quiet_when_there_is_nothing_else_to_find() {
+    let (status, stdout, _) = run(
+        &["scan"],
+        |_| {
+            Ok(ScanOutcome::Completed(report(
+                vec![target("/workspace/node_modules", 1024)],
+                1024,
+            )))
+        },
+        |_, _| Ok(()),
+        "y",
+    );
+
+    assert_eq!(status, 0);
+    assert!(!stdout.contains("Found"));
+    assert!(!stdout.contains("uncached.app"));
+}
+
+#[test]
+fn formats_bytes_like_the_desktop() {
+    assert_eq!(uncached_cli_bin::format_bytes(0), "0 B");
+    assert_eq!(uncached_cli_bin::format_bytes(999), "999 B");
+    assert_eq!(uncached_cli_bin::format_bytes(1024), "1.00 KB");
+    assert_eq!(uncached_cli_bin::format_bytes(1024 * 1024), "1.00 MB");
+    assert_eq!(
+        uncached_cli_bin::format_bytes(3 * 1024 * 1024 * 1024 + 512 * 1024 * 1024),
+        "3.50 GB"
+    );
 }
