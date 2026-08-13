@@ -60,6 +60,15 @@ fn category_label(category: &Category) -> String {
         Category::Gradle => ".gradle".to_owned(),
         Category::DotNetObj => "bin/obj".to_owned(),
         Category::Docker => "Docker cache".to_owned(),
+        Category::XcodeDerivedData => "Xcode build data".to_owned(),
+        Category::SwiftBuild => "Swift builds".to_owned(),
+        Category::DartTool => "Dart tooling".to_owned(),
+        // The catalogued locations live outside any workspace, so a walk from
+        // here never reaches them. They are listed for the day the CLI reports
+        // what the app found in the home directory.
+        Category::PackageManagerCache => "package manager caches".to_owned(),
+        Category::AiToolCache => "AI tool caches".to_owned(),
+        Category::EditorCache => "editor caches".to_owned(),
         Category::Custom(name) => name.clone(),
     }
 }
