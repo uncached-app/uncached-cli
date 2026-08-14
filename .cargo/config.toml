@@ -1,0 +1,2 @@
+[patch."ssh://git@github.com/uncached-app/uncached-core.git"]
+uncached-core = { path = "../uncached-core" }

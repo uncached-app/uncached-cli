@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use uncached_cli_bin::run_with_dependencies;
-use uncached_cli_bin::{DesktopOnlyFinding, ScanOutcome, ScanReport};
+use uncached_cli_bin::{CategorySummary, ScanOutcome, ScanReport};
 use uncached_core::{Category, ScanTarget};
 
 struct FlushTrackingWriter {
@@ -380,10 +380,10 @@ fn final_cleanup_boundary_rejects_replaced_target() {
     fs::remove_dir_all(root).unwrap();
 }
 
-fn desktop_only(findings: &[(Category, u64, usize)]) -> Vec<DesktopOnlyFinding> {
-    findings
+fn by_category(summaries: &[(Category, u64, usize)]) -> Vec<CategorySummary> {
+    summaries
         .iter()
-        .map(|(category, bytes, count)| DesktopOnlyFinding {
+        .map(|(category, bytes, count)| CategorySummary {
             category: category.clone(),
             bytes: *bytes,
             count: *count,
@@ -445,10 +445,41 @@ fn reports_reclaimed_bytes_counting_only_successful_moves() {
     assert!(stderr.contains("trash unavailable"));
 }
 
+/// The CLI removes every artifact it reports. It used to clean `node_modules`
+/// and upsell the rest; nothing is withheld now, so the closing note has to be
+/// about what the app understands rather than about what it is allowed to
+/// delete.
 #[test]
-fn reports_desktop_only_categories_after_the_free_cleanup() {
+fn cleans_every_kind_it_finds_and_not_only_node_modules() {
+    let cleaned = std::cell::RefCell::new(Vec::new());
+    let scan_report = report(
+        vec![
+            target("/workspace/app/node_modules", 1024),
+            target("/workspace/crate/target", 2048),
+            target("/workspace/game/Library", 4096),
+        ],
+        7168,
+    );
+
+    let (status, stdout, _) = run(
+        &["scan"],
+        |_| Ok(ScanOutcome::Completed(scan_report.clone())),
+        |_, target| {
+            cleaned.borrow_mut().push(target.path.clone());
+            Ok(())
+        },
+        "y",
+    );
+
+    assert_eq!(status, 0);
+    assert_eq!(cleaned.borrow().len(), 3, "no kind is left behind");
+    assert!(stdout.contains("Reclaimed 7.00 KB from 3 targets."));
+}
+
+#[test]
+fn breaks_down_the_scan_by_kind_heaviest_first() {
     let mut scan_report = report(vec![target("/workspace/a/node_modules", 1024)], 1024);
-    scan_report.desktop_only = desktop_only(&[
+    scan_report.by_category = by_category(&[
         (Category::NextJs, 2 * 1024 * 1024 * 1024, 3),
         (Category::CargoTarget, 30 * 1024 * 1024 * 1024, 2),
     ]);
@@ -461,52 +492,67 @@ fn reports_desktop_only_categories_after_the_free_cleanup() {
     );
 
     assert_eq!(status, 0);
-    assert!(stdout.contains("Found 32.00 GB more in Cargo target, .next."));
-    assert!(stdout.contains("https://uncached.app"));
-    let moved_index = stdout.find("Moved").unwrap();
-    let upgrade_index = stdout.find("Found 32.00 GB more").unwrap();
-    assert!(
-        moved_index < upgrade_index,
-        "the upgrade line must never precede the free cleanup"
+    assert!(stdout.contains("Cargo target"));
+    assert!(stdout.contains("30.00 GB"));
+    assert!(stdout.contains("3 targets"));
+    let cargo_index = stdout.find("Cargo target").unwrap();
+    let next_index = stdout.find(".next").unwrap();
+    assert!(cargo_index < next_index, "heaviest kind leads");
+}
+
+/// A single kind needs no breakdown: the total below it already says the same
+/// thing, and repeating it would be a table with one row.
+#[test]
+fn a_single_kind_gets_no_breakdown() {
+    let mut scan_report = report(vec![target("/workspace/a/node_modules", 1024)], 1024);
+    scan_report.by_category = by_category(&[(Category::NodeModules, 1024, 1)]);
+
+    let (_, stdout, _) = run(
+        &["scan"],
+        |_| Ok(ScanOutcome::Completed(scan_report.clone())),
+        |_, _| Ok(()),
+        "y",
     );
+
+    assert!(!stdout.contains("1 target  "));
 }
 
 #[test]
-fn empty_free_scan_still_reports_what_the_app_would_clean() {
-    let mut scan_report = report(Vec::new(), 0);
-    scan_report.desktop_only = desktop_only(&[(Category::Gradle, 5 * 1024 * 1024 * 1024, 1)]);
-
+fn an_empty_scan_says_so_and_offers_nothing() {
     let (status, stdout, _) = run(
         &["scan"],
-        |_| Ok(ScanOutcome::Completed(scan_report.clone())),
+        |_| Ok(ScanOutcome::Completed(report(Vec::new(), 0))),
         |_, _| panic!("empty scan must not clean"),
         "N",
     );
 
     assert_eq!(status, 0);
-    assert!(stdout.contains("No node_modules found."));
-    assert!(stdout.contains("Found 5.00 GB more in .gradle."));
+    assert!(stdout.contains("No build artifacts found."));
+    assert!(!stdout.contains("uncached.app"), "nothing was done to follow up on");
 }
 
 #[test]
-fn declined_cleanup_still_reports_what_the_app_would_clean() {
-    let mut scan_report = report(vec![target("/workspace/node_modules", 1024)], 1024);
-    scan_report.desktop_only = desktop_only(&[(Category::Turbo, 1024 * 1024, 1)]);
-
+fn a_declined_cleanup_ends_without_a_pitch() {
     let (status, stdout, _) = run(
         &["scan"],
-        |_| Ok(ScanOutcome::Completed(scan_report.clone())),
+        |_| {
+            Ok(ScanOutcome::Completed(report(
+                vec![target("/workspace/node_modules", 1024)],
+                1024,
+            )))
+        },
         |_, _| panic!("declined cleanup must not clean"),
         "N",
     );
 
     assert_eq!(status, 0);
     assert!(stdout.contains("Cancelled."));
-    assert!(stdout.contains("Found 1.00 MB more in .turbo."));
+    assert!(!stdout.contains("uncached.app"));
 }
 
+/// The note follows the work and never precedes it.
 #[test]
-fn stays_quiet_when_there_is_nothing_else_to_find() {
+fn the_app_note_comes_after_the_cleanup() {
     let (status, stdout, _) = run(
         &["scan"],
         |_| {
@@ -520,8 +566,9 @@ fn stays_quiet_when_there_is_nothing_else_to_find() {
     );
 
     assert_eq!(status, 0);
-    assert!(!stdout.contains("Found"));
-    assert!(!stdout.contains("uncached.app"));
+    let moved_index = stdout.find("Moved").unwrap();
+    let note_index = stdout.find("uncached.app").unwrap();
+    assert!(moved_index < note_index);
 }
 
 #[test]

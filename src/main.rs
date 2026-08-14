@@ -1,15 +1,11 @@
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
-use uncached_cli_bin::{run_with_dependencies, DesktopOnlyFinding, ScanOutcome, ScanReport};
+use uncached_cli_bin::{run_with_dependencies, CategorySummary, ScanOutcome, ScanReport};
 use uncached_core::{
     clean_to_trash, filesystem::directory_size_report, traverse_workspace, Category, FileIdentity,
     ProviderSet, ScanTarget, TraversalControl, TraversalOutcome,
 };
-
-/// The one category the free CLI is allowed to clean. Everything else is
-/// discovered and reported, never removed here.
-const FREE_CATEGORY: Category = Category::NodeModules;
 
 struct Candidate {
     path: PathBuf,
@@ -43,7 +39,7 @@ fn scan_workspace(root: &Path) -> Result<ScanOutcome, String> {
 
     let mut targets = Vec::new();
     let mut total_bytes = 0u64;
-    let mut desktop_only: Vec<DesktopOnlyFinding> = Vec::new();
+    let mut by_category: Vec<CategorySummary> = Vec::new();
 
     for candidate in candidates {
         // A partial size is better than no size: an unreadable subtree reports
@@ -52,31 +48,31 @@ fn scan_workspace(root: &Path) -> Result<ScanOutcome, String> {
             .map(|report| report.bytes)
             .unwrap_or(0);
 
-        if candidate.category == FREE_CATEGORY {
-            total_bytes += bytes;
-            targets.push(
-                ScanTarget::new(candidate.path, candidate.category, bytes)
-                    .with_identity(candidate.identity),
-            );
-        } else if let Some(finding) = desktop_only
+        total_bytes += bytes;
+        match by_category
             .iter_mut()
-            .find(|finding| finding.category == candidate.category)
+            .find(|summary| summary.category == candidate.category)
         {
-            finding.bytes += bytes;
-            finding.count += 1;
-        } else {
-            desktop_only.push(DesktopOnlyFinding {
-                category: candidate.category,
+            Some(summary) => {
+                summary.bytes += bytes;
+                summary.count += 1;
+            }
+            None => by_category.push(CategorySummary {
+                category: candidate.category.clone(),
                 bytes,
                 count: 1,
-            });
+            }),
         }
+        targets.push(
+            ScanTarget::new(candidate.path, candidate.category, bytes)
+                .with_identity(candidate.identity),
+        );
     }
 
     Ok(ScanOutcome::Completed(ScanReport {
         targets,
         total_bytes,
-        desktop_only,
+        by_category,
     }))
 }
 
@@ -92,9 +88,10 @@ fn main() {
         &workspace,
         scan_workspace,
         |root, target| {
-            // Cleanup keeps the free provider set: the boundary that authorizes
-            // deletion stays narrower than the one that authorizes discovery.
-            clean_to_trash(root, &ProviderSet::free(), target)
+            // The same set that found it vouches for it. There is no narrower
+            // boundary to keep: every artifact the walk reports is one the CLI
+            // removes, and the provider still has to confirm the path first.
+            clean_to_trash(root, &ProviderSet::all(), target)
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         },

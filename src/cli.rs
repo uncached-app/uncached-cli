@@ -8,11 +8,13 @@ const KB: u64 = 1024;
 const MB: u64 = KB * 1024;
 const GB: u64 = MB * 1024;
 
-/// A category the free CLI never cleans, sized during the same walk. Reporting
-/// it keeps the scan honest: the user sees the whole picture instead of only
-/// the `node_modules` slice the CLI is allowed to remove.
+/// What one kind of artifact weighs across the whole scan.
+///
+/// This used to be the opposite: a list of what the CLI found and refused to
+/// clean, because only `node_modules` was free. Nothing is withheld now, so the
+/// breakdown reports what is being removed instead of what is being upsold.
 #[derive(Debug, Clone)]
-pub struct DesktopOnlyFinding {
+pub struct CategorySummary {
     pub category: Category,
     pub bytes: u64,
     pub count: usize,
@@ -22,13 +24,7 @@ pub struct DesktopOnlyFinding {
 pub struct ScanReport {
     pub targets: Vec<ScanTarget>,
     pub total_bytes: u64,
-    pub desktop_only: Vec<DesktopOnlyFinding>,
-}
-
-impl ScanReport {
-    pub fn desktop_only_bytes(&self) -> u64 {
-        self.desktop_only.iter().map(|finding| finding.bytes).sum()
-    }
+    pub by_category: Vec<CategorySummary>,
 }
 
 pub enum ScanOutcome {
@@ -63,6 +59,25 @@ fn category_label(category: &Category) -> String {
         Category::XcodeDerivedData => "Xcode build data".to_owned(),
         Category::SwiftBuild => "Swift builds".to_owned(),
         Category::DartTool => "Dart tooling".to_owned(),
+        Category::FlutterBuild => "Flutter build".to_owned(),
+        Category::MavenTarget => "Maven target".to_owned(),
+        Category::GradleBuild => "Gradle build".to_owned(),
+        Category::SbtTarget => "sbt target".to_owned(),
+        Category::CMakeBuild => "CMake build".to_owned(),
+        Category::ZigCache => "Zig cache".to_owned(),
+        Category::ElixirBuild => "Elixir _build".to_owned(),
+        Category::HaskellBuild => "Haskell build".to_owned(),
+        Category::NuxtCache => ".nuxt".to_owned(),
+        Category::SvelteKitCache => ".svelte-kit".to_owned(),
+        Category::ReactNative => "React Native build data".to_owned(),
+        Category::JupyterCheckpoints => "notebook checkpoints".to_owned(),
+        Category::PixiEnv => ".pixi".to_owned(),
+        Category::ComposerVendor => "Composer vendor".to_owned(),
+        Category::TerraformDir => ".terraform".to_owned(),
+        Category::CocoapodsPods => "Pods".to_owned(),
+        Category::UnityLibrary => "Unity build data".to_owned(),
+        Category::UnrealIntermediate => "Unreal build data".to_owned(),
+        Category::GodotCache => ".godot".to_owned(),
         // The catalogued locations live outside any workspace, so a walk from
         // here never reaches them. They are listed for the day the CLI reports
         // what the app found in the home directory.
@@ -81,24 +96,41 @@ fn plural(count: usize, singular: &str) -> String {
     }
 }
 
-/// Prints what the CLI found but does not clean. It runs after the free work is
-/// done, never before it and never in place of it.
-fn write_desktop_only<O: Write>(output: &mut O, report: &ScanReport) {
-    let bytes = report.desktop_only_bytes();
-    if bytes == 0 {
+/// What the scan found, one line per kind, heaviest first.
+fn write_breakdown<O: Write>(output: &mut O, report: &ScanReport) {
+    if report.by_category.len() < 2 {
         return;
     }
-    let mut findings = report.desktop_only.clone();
-    findings.sort_by_key(|finding| std::cmp::Reverse(finding.bytes));
-    let labels = findings
+    let mut summaries = report.by_category.clone();
+    summaries.sort_by_key(|summary| std::cmp::Reverse(summary.bytes));
+    let width = summaries
         .iter()
-        .map(|finding| category_label(&finding.category))
-        .collect::<Vec<_>>()
-        .join(", ");
+        .map(|summary| category_label(&summary.category).chars().count())
+        .max()
+        .unwrap_or(0);
 
     let _ = writeln!(output);
-    let _ = writeln!(output, "Found {} more in {labels}.", format_bytes(bytes));
-    let _ = writeln!(output, "The Uncached app cleans those too: {UPGRADE_URL}");
+    for summary in summaries {
+        let _ = writeln!(
+            output,
+            "{:<width$}  {:>12}  {:>10}",
+            category_label(&summary.category),
+            plural(summary.count, "target"),
+            format_bytes(summary.bytes)
+        );
+    }
+}
+
+/// The app is not a bigger version of this. It reads the same artifacts and
+/// adds what a terminal cannot: which project each one belongs to, and which of
+/// those projects hold work that exists nowhere else.
+fn write_app_note<O: Write>(output: &mut O) {
+    let _ = writeln!(output);
+    let _ = writeln!(
+        output,
+        "Uncached for desktop maps the projects these came from, and flags the ones"
+    );
+    let _ = writeln!(output, "holding work that only exists on this disk: {UPGRADE_URL}");
 }
 
 pub fn run_with_dependencies<I, S, C, Q, O, E>(
@@ -159,9 +191,10 @@ where
         );
     }
 
+    write_breakdown(output, &report);
+
     if report.targets.is_empty() {
-        let _ = writeln!(output, "No node_modules found.");
-        write_desktop_only(output, &report);
+        let _ = writeln!(output, "No build artifacts found.");
         return 0;
     }
 
@@ -185,7 +218,6 @@ where
     };
     if answer.trim_end_matches(['\r', '\n']) != "y" {
         let _ = writeln!(output, "Cancelled.");
-        write_desktop_only(output, &report);
         return 0;
     }
 
@@ -211,6 +243,6 @@ where
         format_bytes(freed_bytes),
         plural(moved, "target")
     );
-    write_desktop_only(output, &report);
+    write_app_note(output);
     0
 }
