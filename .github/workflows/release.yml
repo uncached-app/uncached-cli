@@ -1,12 +1,17 @@
 name: Build and release CLI
 
+# Tags only. This builds and publishes four targets, two of them macOS at ten
+# times the minutes, and it was running on every push to main — spending the
+# most expensive runners there are to fail on its second step, which it did
+# every time for as long as it has existed.
+#
+# A workflow named "Build and release" should run when there is something to
+# release.
 on:
-  pull_request:
   push:
-    branches:
-      - main
     tags:
       - 'v*.*.*'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -45,8 +50,12 @@ jobs:
       - name: Read pinned core revision
         shell: bash
         run: |
-          core_rev=$(sed -n 's/.*rev = "\([0-9a-f]\{40\}\)".*/\1/p' Cargo.toml)
+          # Seven to forty, because Cargo accepts a short rev and this one is
+          # written short. Demanding forty matched nothing, so the variable was
+          # empty and this step failed on every run it has ever had.
+          core_rev=$(sed -n 's/.*rev = "\([0-9a-f]\{7,40\}\)".*/\1/p' Cargo.toml)
           test -n "$core_rev" || { echo "Cargo.toml has no pinned uncached-core revision" >&2; exit 1; }
+          echo "Pinned core revision: $core_rev"
           echo "CORE_REV=$core_rev" >> "$GITHUB_ENV"
 
       - name: Reject fork pull request without private-core access
