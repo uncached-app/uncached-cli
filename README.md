@@ -69,15 +69,9 @@ npm publish --dry-run
 Tagged release publication runs in GitHub Actions only. Configure these secret
 names in the repository without committing their values:
 
-- `UNCACHED_CORE_DEPLOY_KEY`: read-only deploy key for private `natanvianasp/uncached`.
 - `NPM_TOKEN`: npm automation token with publish permission.
 
 Push a version tag matching package versions, such as `v0.1.0`. Pull requests
-build, smoke-test, and preview packages but never publish. GitHub does not expose
-`UNCACHED_CORE_DEPLOY_KEY` to fork pull requests, so fork PR workflows fail with
-an actionable message; use a branch in this repository or a trusted maintainer-
-triggered workflow for private-core CI. This limitation does not grant fork code
-access to the deploy key or weaken release security.
-
-Source repositories remain private. Release CI publishes the root launcher and
-matching platform packages with their compiled Rust binaries.
+build, smoke-test, and preview packages but never publish. `uncached-core` is
+public and fetched over HTTPS, so no deploy key is needed. Release CI publishes
+the root launcher and matching platform packages with their compiled Rust binaries.
