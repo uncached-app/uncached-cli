@@ -16,9 +16,6 @@ on:
 permissions:
   contents: read
 
-env:
-  CORE_REPOSITORY: uncached-app/uncached-core
-
 jobs:
   build:
     name: ${{ matrix.target }}
@@ -57,28 +54,6 @@ jobs:
           test -n "$core_rev" || { echo "Cargo.toml has no pinned uncached-core revision" >&2; exit 1; }
           echo "Pinned core revision: $core_rev"
           echo "CORE_REV=$core_rev" >> "$GITHUB_ENV"
-
-      - name: Reject fork pull request without private-core access
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork
-        shell: bash
-        run: |
-          echo "Fork pull requests cannot receive UNCACHED_CORE_DEPLOY_KEY; run this check from a branch in the main repository or use a trusted maintainer-triggered workflow." >&2
-          exit 1
-
-      - name: Require private core deploy key
-        shell: bash
-        env:
-          UNCACHED_CORE_DEPLOY_KEY: ${{ secrets.UNCACHED_CORE_DEPLOY_KEY }}
-        run: |
-          if [ -z "$UNCACHED_CORE_DEPLOY_KEY" ]; then
-            echo "Missing Actions secret UNCACHED_CORE_DEPLOY_KEY; configure a read-only deploy key for $CORE_REPOSITORY." >&2
-            exit 1
-          fi
-
-      - name: Load private core deploy key
-        uses: webfactory/ssh-agent@v0.9.0
-        with:
-          ssh-private-key: ${{ secrets.UNCACHED_CORE_DEPLOY_KEY }}
 
       - name: Configure Rust
         uses: dtolnay/rust-toolchain@stable
